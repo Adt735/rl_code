@@ -1,0 +1,40 @@
+[package]
+name = "rl_code"
+version = "0.1.0"
+edition = "2024"
+
+
+[[bin]]
+name = "discrete"
+path = "src/discrete_2d.rs"
+
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = true
+opt-level = 3
+codegen-units = 1
+incremental = false
+debug = false
+
+
+[dependencies]
+fastrand = "2.4.1"
+rand = "0.10.1"
+nalgebra = { version = "0.35.0", features = ["serde-serialize"] }
+rapier3d = "0.32.0"
+
+tch = "0.18.0"
+
+plotters = "0.3.7"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+clap = { version = "4.6.1", features = ["derive"] }
+toml = "1.1.2"
+serde_with = "3.20.0"
+indicatif = "0.18.4"
