@@ -1,6 +1,7 @@
 //! This crate holds the implementation of RL algorithms and environments, 
 //! as well as the definition of its framework
 use serde::{Serialize, de::DeserializeOwned};
+use tch::Tensor;
 
 pub mod algorithms;
 pub mod environments;
@@ -55,11 +56,41 @@ pub trait RLAlgorithmTrait<S: State, A: Action>: Serialize + DeserializeOwned {
 }
 
 /// All the methods every `State` must implement
-pub trait State: Clone {
-
-}
+pub trait State: Clone + ToTensor {}
 
 /// All the methodws every `Action` must implement
-pub trait Action: Clone {
+pub trait Action: Clone + ToTensor {
     fn get_all_actions() -> Vec<Self>;
+}
+
+
+pub trait ToTensor {
+    /// Get the number of elements of a single struct
+    fn len(&self) -> usize;
+    /// Convert a state to a Vec of f32 (for converting it to a tensor later)
+    fn to_vec(&self) -> Vec<f32>;
+
+    fn to_tensor(&self) -> Tensor {
+        Tensor::from_slice(&self.to_vec())
+    }
+}
+
+pub trait ToTensorVecExt {
+    fn to_tensor(&self) -> Tensor;
+}
+impl<T: ToTensor> ToTensorVecExt for Vec<T> {
+    fn to_tensor(&self) -> Tensor {
+        // if self.is_empty() {
+        //     // Returns an empty 2D tensor [[0, 0]] if the vector is empty
+        //     return Tensor::empty([0, 0], (tch::Kind::Float, tch::Device::Cpu));
+        // }
+
+        let data: Vec<f32> = self
+            .iter()
+            .flat_map(|v| v.to_vec())
+            .collect();
+
+        // self.len() is the batch size, self[0].len() is the features per struct
+        Tensor::from_slice(&data).view([self.len() as i64, self[0].len() as i64])
+    }
 }

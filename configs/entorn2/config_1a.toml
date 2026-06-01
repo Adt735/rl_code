@@ -1,0 +1,39 @@
+[algo.FromConfig.DeepQLearning]
+min_e = 0.05
+decay_rate_e = 0.997
+learning_rate = 1e-3
+reward_discount_factor = 0.99
+max_steps_per_epoch = 2000
+
+batch_size = 256
+n_rollouts = 2000
+n_epochs = 8
+n_epochs_to_update_target = 8
+replay_memory_capacity = 20000
+q_network_layers = [8, 64, 3]
+
+[env.Plane]
+width = 10.0
+height = 10.0
+start_x = 0.0
+start_y = 0.0
+goal_x = 5.0
+goal_y = 5.0
+n_rays = 5
+length_ray = 2.0
+ray_span = 1.57 # In radians
+reward_type = "Flat"
+
+obstacles = [
+    # [3.0, 5.0]
+]
+
+
+[training]
+epochs = 1000
+
+
+[action.SolutionVisualization]
+saving_path = "./assets/"
+show_info_in_plot = true
+create_video = true

@@ -7,6 +7,9 @@ edition = "2024"
 [[bin]]
 name = "discrete"
 path = "src/discrete_2d.rs"
+[[bin]]
+name = "continuous"
+path = "src/continuous_2d.rs"
 
 
 [profile.dev]
@@ -27,7 +30,7 @@ debug = false
 fastrand = "2.4.1"
 rand = "0.10.1"
 nalgebra = { version = "0.35.0", features = ["serde-serialize"] }
-rapier3d = "0.32.0"
+rapier3d = { version = "0.32.0", features = ["serde-serialize"] }
 
 tch = "0.18.0"
 
@@ -38,3 +41,4 @@ clap = { version = "4.6.1", features = ["derive"] }
 toml = "1.1.2"
 serde_with = "3.20.0"
 indicatif = "0.18.4"
+ndarray = "0.17.2"

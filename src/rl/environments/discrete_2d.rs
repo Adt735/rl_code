@@ -427,6 +427,15 @@ impl Action for GridActions {
         vec![Self::Up, Self::Right, Self::Down, Self::Left]
     }
 }
+impl ToTensor for GridActions {
+    fn len(&self) -> usize {
+        1
+    }
+
+    fn to_vec(&self) -> Vec<f32> {
+        vec![*self as u8 as f32]
+    }
+}
 
 
 /**************************************************************
@@ -464,8 +473,15 @@ impl GridState {
         data
     }
 }
-impl State for GridState {
-    
+impl State for GridState {}
+impl ToTensor for GridState {
+    fn len(&self) -> usize {
+        2
+    }
+
+    fn to_vec(&self) -> Vec<f32> {
+        vec![self.direction_to_goal.x as f32, self.direction_to_goal.y as f32]
+    }
 }
 
 

@@ -151,6 +151,7 @@ impl Statistics {
         show_info: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if self.history.is_empty() {
+            println!("Empty statistics");
             return Ok(());
         }
 

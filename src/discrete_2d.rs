@@ -97,7 +97,10 @@ fn main() {
             let mut decay_results = Vec::new();
             let algo_config = match config.algo {
                 AlgoInitialization::Load { .. } => panic!("Only accepts FromConfig"),
-                AlgoInitialization::FromConfig(algo_config) => algo_config,
+                AlgoInitialization::FromConfig(algo_type) => match algo_type {
+                    AlgoType::TabularQLearning(t) => t,
+                    _ => { panic!("Only supports tabular"); }
+                },
             };
             let environment = generate_environment(&config.env);
             let goal_pos = environment.goal_pos;
@@ -140,10 +143,14 @@ fn main() {
             }
 
             // ---------------------- Saving Results ---------------------------------------
+            let width = match config.env {
+                EnvironmentType::Grid(env_config) => { env_config.width }
+                EnvironmentType::Plane(env_config) => { env_config.width as usize}
+            };
             std::fs::create_dir_all(hyperparams_config.saving_path.clone()).unwrap();
             plots::visualize_alpha_gamma_impact(
                 hyperparams_config.learning_rates, hyperparams_config.reward_discount_factors, 
-                config.env.width, goal_pos,  &(hyperparams_config.saving_path.clone() + "hyper_check.png"), results
+                width, goal_pos,  &(hyperparams_config.saving_path.clone() + "hyper_check.png"), results
             );
             Statistics::plot_multiple(
                 &(hyperparams_config.saving_path.clone() + "hyper_e_check.png"), 
@@ -190,30 +197,40 @@ fn load_algo(algo_initialization: &AlgoInitialization) -> TabularQLearning<GridS
             let json = std::fs::read_to_string(path).unwrap();
             serde_json::from_str(&json).unwrap()
         },
-        AlgoInitialization::FromConfig(algo_config) => {
-            TabularQLearning::new(
-                algo_config.min_e, algo_config.decay_rate_e, 
-                algo_config.learning_rate, algo_config.reward_discount_factor, 
-                algo_config.max_steps_per_epoch
-            )
+        AlgoInitialization::FromConfig(algo_type) => {
+            match algo_type {
+                AlgoType::TabularQLearning(algo_config) => {
+                    TabularQLearning::new(
+                        algo_config.min_e, algo_config.decay_rate_e, 
+                        algo_config.learning_rate, algo_config.reward_discount_factor, 
+                        algo_config.max_steps_per_epoch
+                    )
+                }
+                _ => panic!("This executable only accepts Plain Environment")
+            }
         },
     }
 }
 
-fn generate_environment(env_config: &EnvConfig) -> SimpleGridEnvironment {
-    let agent_start = Vector2::new(env_config.start_x, env_config.start_y);
-    let (goal, walls) = match env_config.maze_difficulty {
-        Some(difficulty) => {
-            let walls = generate_maze(env_config.width as i32, env_config.height as i32, difficulty, agent_start);
-            let goal = find_furthest_cell(agent_start, env_config.width as i32, env_config.height as i32, &walls);
-            (goal, walls)
-        },
-        None => (Vector2::new(env_config.goal_x,env_config.goal_y), HashSet::default()),
-    };
+fn generate_environment(env_type: &EnvironmentType) -> SimpleGridEnvironment {
+    match env_type {
+        EnvironmentType::Grid(env_config) => {
+            let agent_start = Vector2::new(env_config.start_x, env_config.start_y);
+            let (goal, walls) = match env_config.maze_difficulty {
+                Some(difficulty) => {
+                    let walls = generate_maze(env_config.width as i32, env_config.height as i32, difficulty, agent_start);
+                    let goal = find_furthest_cell(agent_start, env_config.width as i32, env_config.height as i32, &walls);
+                    (goal, walls)
+                },
+                None => (Vector2::new(env_config.goal_x,env_config.goal_y), HashSet::default()),
+            };
 
-    SimpleGridEnvironment::new(
-        env_config.width, env_config.height,
-        agent_start, goal,
-        walls, env_config.reward_type,
-    )
+            SimpleGridEnvironment::new(
+                env_config.width, env_config.height,
+                agent_start, goal,
+                walls, env_config.reward_type,
+            )
+        }
+        _ => panic!("This executable only accepts Plain Environment")
+    }
 }
