@@ -31,6 +31,8 @@ pub struct TabularQLearning<S: State + Hash + Eq + Serialize + DeserializeOwned,
 
     #[serde(skip, default)]
     pub statistics: Statistics,
+
+    algo_type: RlAlgoType,
 }
 impl<S: State + Hash + Eq + Serialize + DeserializeOwned, A: Action + Hash + Eq + Serialize + DeserializeOwned> TabularQLearning<S, A> {
     pub fn new(min_e: f32, decay_rate_e: f32, learning_rate: f32, reward_discount_factor: f32, max_steps_per_epoch: usize) -> Self {
@@ -41,6 +43,7 @@ impl<S: State + Hash + Eq + Serialize + DeserializeOwned, A: Action + Hash + Eq 
             max_steps_per_epoch,
             q_mat: HashMap::default(),
             statistics: Statistics::default(),
+            algo_type: RlAlgoType::TabularQTable,
         }
     }
 }
@@ -119,6 +122,18 @@ impl<S: State + Hash + Eq + Clone + Send + Sync + Serialize + DeserializeOwned, 
         let entry_size = size_of::<((S, A), f32)>();
 
         (buckets * entry_size) as f32 / 1024.0
+    }
+
+    fn get_statistics(&self) -> &Statistics {
+        &self.statistics
+    }
+
+    fn to_json(&self) -> String {
+        serde_json::to_string_pretty(&self).unwrap()
+    }
+
+    fn get_type(&self) -> RlAlgoType {
+        self.algo_type
     }
 }
 

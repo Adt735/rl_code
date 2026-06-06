@@ -3,6 +3,16 @@ use tch::{Device, nn};
 
 
 
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "Device")]
+pub enum DeviceDef {
+    Cpu,
+    Cuda(usize),
+    Mps,
+    Vulkan,
+}
+
+
 /// Wrapper around a `tch::nn`
 pub struct NeuralNetwork {
     pub layers: Vec<i64>,

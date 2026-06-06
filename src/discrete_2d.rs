@@ -21,7 +21,7 @@ fn main() {
     match config.action {
         utils::cli::Action::SolutionVisualization(output_config) => {
             // ----------------------- Initialization ----------------------------------------
-            let mut algo = load_algo(&config.algo);
+            let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
             let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
 
             // ----------------------- Training ----------------------------------------
@@ -70,7 +70,7 @@ fn main() {
                 (0..compare_config.n_iterations).map(|_| {
                         let algo_config = &config.algo;
 
-                        let mut algo = load_algo(&config.algo);
+                        let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
 
                         for _ in 0..config.training.epochs {
                             algo.train_epoch(&mut environment);
@@ -114,7 +114,7 @@ fn main() {
                     let mut algo = TabularQLearning::new(
                         algo_config.min_e, algo_config.decay_rate_e, 
                         *alpha, *gamma, 
-                        algo_config.max_steps_per_epoch
+                        config.training.max_steps_per_epoch
                     );
 
                     for _ in 0..config.training.epochs {
@@ -132,7 +132,7 @@ fn main() {
                 let mut algo = TabularQLearning::new(
                     algo_config.min_e, e_decay, 
                     algo_config.learning_rate, algo_config.reward_discount_factor, 
-                    algo_config.max_steps_per_epoch
+                    config.training.max_steps_per_epoch
                 );
 
                 for _ in 0..config.training.epochs {
@@ -167,7 +167,7 @@ fn main() {
             println!("Starting training");
             for _ in (0..usage_config.tries).progress() {
                 // ----------------------- Initialization ----------------------------------------
-                let mut algo = load_algo(&config.algo);
+                let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
                 let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
 
                 // ----------------------- Training ----------------------------------------
@@ -191,7 +191,7 @@ fn main() {
 }
 
 
-fn load_algo(algo_initialization: &AlgoInitialization) -> TabularQLearning<GridState, GridActions> {
+fn load_algo(algo_initialization: &AlgoInitialization, max_steps_per_epoch: usize) -> TabularQLearning<GridState, GridActions> {
     match algo_initialization {
         AlgoInitialization::Load { path } => {
             let json = std::fs::read_to_string(path).unwrap();
@@ -203,7 +203,7 @@ fn load_algo(algo_initialization: &AlgoInitialization) -> TabularQLearning<GridS
                     TabularQLearning::new(
                         algo_config.min_e, algo_config.decay_rate_e, 
                         algo_config.learning_rate, algo_config.reward_discount_factor, 
-                        algo_config.max_steps_per_epoch
+                        max_steps_per_epoch
                     )
                 }
                 _ => panic!("This executable only accepts Plain Environment")

@@ -40,7 +40,9 @@ pub enum AlgoInitialization {
 #[derive(Deserialize)]
 pub enum AlgoType {
     TabularQLearning(TabularQConfig),
-    DeepQLearning(DeepQConfig)
+    DeepQLearning(DeepQConfig),
+    PPO(PPOConfig),
+    Evolutionary(EvolutionaryConfig),
 }
 
 #[derive(Deserialize)]
@@ -49,7 +51,6 @@ pub struct TabularQConfig {
     pub decay_rate_e: f32,
     pub learning_rate: f32,
     pub reward_discount_factor: f32,
-    pub max_steps_per_epoch: usize,
 }
 #[derive(Deserialize)]
 pub struct DeepQConfig {
@@ -57,7 +58,6 @@ pub struct DeepQConfig {
     pub decay_rate_e: f32,
     pub learning_rate: f32,
     pub reward_discount_factor: f32,
-    pub max_steps_per_epoch: usize,
 
     pub batch_size: usize, 
     pub n_rollouts: usize, 
@@ -65,6 +65,32 @@ pub struct DeepQConfig {
     pub n_epochs_to_update_target: usize,
     pub replay_memory_capacity: usize, 
     pub q_network_layers: Vec<i64>,
+}
+#[derive(Deserialize)]
+pub struct PPOConfig {
+    pub actor_layers: Vec<i64>,
+    pub critic_layers: Vec<i64>,
+    pub actor_lr: f64,
+    pub critic_lr: f64,
+    pub lmbda: f32,
+    pub epochs: usize,
+    pub batch_size: usize,
+    pub mini_batch_size: usize,
+    pub epsilon: f32,
+    pub gamma: f32,
+    pub current_entropy_weight: f32,
+    pub min_entropy: f32,
+    pub decay_rate_entropy: f32,
+}
+#[derive(Deserialize)]
+pub struct EvolutionaryConfig {
+    pub nn_layers: Vec<usize>,
+    pub population_size: usize,
+    pub elite_count: usize,
+    pub mutation_rate: f32,
+    pub mutation_strength: f32,
+    pub mutation_strength_decay: f32,
+    pub min_mutation_strength: f32,    
 }
 
 
@@ -122,6 +148,7 @@ pub struct PlaneEnvConfig {
 #[derive(Deserialize)]
 pub struct TrainingConfig {
     pub epochs: usize,
+    pub max_steps_per_epoch: usize,
 }
 
 

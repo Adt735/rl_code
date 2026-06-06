@@ -18,12 +18,12 @@ start_y = 0
 goal_x = 9
 goal_y = 9
 
-maze_difficulty = 0.5
-reward_type = "Flat"
+# maze_difficulty = 0.5
+reward_type = "Gradient"
 
 
 [training]
-epochs = 500
+epochs = 10
 
 
 [action.SolutionVisualization]

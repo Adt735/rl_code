@@ -1,7 +1,11 @@
 //! This crate holds the implementation of RL algorithms and environments, 
 //! as well as the definition of its framework
-use serde::{Serialize, de::DeserializeOwned};
+use std::hash::Hash;
+
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tch::Tensor;
+
+use crate::rl::{algorithms::prelude::{DeepQLearning, EvolutionaryAlgorithm, PPO, TabularQLearning}, utils::prelude::Statistics};
 
 pub mod algorithms;
 pub mod environments;
@@ -42,7 +46,8 @@ pub trait EnvironmentTrait<S: State, A: Action> {
 ///
 /// The algorithm interacts with an environment and learns a policy
 /// that maps states to actions.
-pub trait RLAlgorithmTrait<S: State, A: Action>: Serialize + DeserializeOwned {
+pub trait RLAlgorithmTrait<S: State, A: Action>
+{
     /// Executes one training epoch over the environment.
     fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>);
 
@@ -53,14 +58,35 @@ pub trait RLAlgorithmTrait<S: State, A: Action>: Serialize + DeserializeOwned {
 
     /// Get memory usage of the algorithm in `kb`. Just for research purposes
     fn get_memory_usage(&self) -> f32 { 0.0 }
+
+    /// Get statistics
+    fn get_statistics(&self) -> &Statistics;
+
+    fn get_type(&self) -> RlAlgoType;
+    fn to_json(&self) -> String;
 }
 
 /// All the methods every `State` must implement
-pub trait State: Clone + ToTensor {}
+pub trait State: Default + Clone + ToTensor {}
 
 /// All the methodws every `Action` must implement
-pub trait Action: Clone + ToTensor {
+pub trait Action: Default + Clone + ToTensor {
     fn get_all_actions() -> Vec<Self>;
+}
+
+
+pub trait SerializableAlgorithm: Serialize + DeserializeOwned
+{
+    fn to_json(&self) -> String {
+        serde_json::to_string(self).unwrap()
+    }
+
+    fn load(info: String) -> Self
+    where
+        Self: Sized,
+    {
+        serde_json::from_str(&info).unwrap()
+    }
 }
 
 
@@ -93,4 +119,17 @@ impl<T: ToTensor> ToTensorVecExt for Vec<T> {
         // self.len() is the batch size, self[0].len() is the features per struct
         Tensor::from_slice(&data).view([self.len() as i64, self[0].len() as i64])
     }
+}
+
+
+#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
+pub enum RlAlgoType {
+    TabularQTable,
+    DeepQ,
+    PPO,
+    Evolutionary,
+}
+#[derive(Serialize, Deserialize)]
+pub struct AlgoHeader {
+    pub algo_type: RlAlgoType,
 }

@@ -352,7 +352,7 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
         let simulation = self.simulation.as_mut().unwrap();
         let agent = simulation.bodies.get_mut(self.agent_handle.unwrap()).unwrap();
         let goal_pos = Vector3::new(self.goal_pos.x, 0.5, self.goal_pos.y);
-        let distance = agent.translation().distance(goal_pos);
+        let distance = agent.translation().xz().distance(goal_pos.xz());
         self.trajectory.push(agent.translation().xz());
 
         // -------- Compute collision with obstacles --------------
@@ -367,7 +367,7 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
         }
         
         (
-            -distance - if intersected { 50.0 } else { 0.0 } + if distance < 1e-1 { 50.0 } else { 0.0 }, 
+            -distance - if intersected { 50.0 } else { 0.0 } + if distance < 0.2 { 50.0 } else { 0.0 }, 
             distance < 0.2,
         )
     }

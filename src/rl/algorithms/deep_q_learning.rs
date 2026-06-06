@@ -5,7 +5,7 @@ use rand::seq::index::sample;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
 use tch::{Device, Tensor, nn::{self, AdamW, Module, OptimizerConfig}};
 
-use crate::rl::{Action, EnvironmentTrait, RLAlgorithmTrait, State, ToTensorVecExt, algorithms::tch_wrapper::NeuralNetwork, utils::prelude::Statistics};
+use crate::rl::{Action, EnvironmentTrait, RLAlgorithmTrait, RlAlgoType, State, ToTensorVecExt, algorithms::tch_wrapper::{DeviceDef, NeuralNetwork}, utils::prelude::Statistics};
 
 
 
@@ -41,6 +41,8 @@ pub struct DeepQLearning<S: Default + State, A: Default + Action> {
 
     #[serde(skip, default)]
     pub statistics: Statistics,
+
+    algo_type: RlAlgoType,
 }
 impl<S, A> DeepQLearning<S, A>
 where
@@ -62,7 +64,7 @@ where
             device, replay_memory: ReplayMemory::new(replay_memory_capacity, device),
             optimizer: Some(AdamW::default().build(&q_network.vs, learning_rate as f64).unwrap()),
             q_network, target_network, optimizer_learning_rate: learning_rate,
-            statistics: Statistics::default(),
+            statistics: Statistics::default(), algo_type: RlAlgoType::DeepQ
         }
     }
 
@@ -209,6 +211,18 @@ where
 
         ( replay_memory_mem + 2*self.q_network.varstore_size_bytes() ) as f32 / 1024.0
     }
+
+    fn get_statistics(&self) -> &Statistics {
+        &self.statistics
+    }
+
+    fn to_json(&self) -> String {
+        serde_json::to_string_pretty(&self).unwrap()
+    }
+
+    fn get_type(&self) -> RlAlgoType {
+        self.algo_type
+    }
 }
 
 
@@ -326,16 +340,6 @@ where
                         Serializing
 ===============================================================
 **************************************************************/
-#[derive(Serialize, Deserialize)]
-#[serde(remote = "Device")]
-pub enum DeviceDef {
-    Cpu,
-    Cuda(usize),
-    Mps,
-    Vulkan,
-}
-
-
 #[derive(Serialize, Deserialize)]
 struct ReplayMemoryMetadata {
     capacity: usize,

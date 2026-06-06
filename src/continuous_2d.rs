@@ -2,7 +2,7 @@ use clap::Parser;
 use indicatif::ProgressIterator;
 use rapier3d::math::Vec2;
 
-use crate::rl::{Action, EnvironmentTrait, RLAlgorithmTrait, algorithms::prelude::*, environments::prelude::*, utils::{self, cli::*}};
+use crate::rl::{Action, AlgoHeader, EnvironmentTrait, RLAlgorithmTrait, algorithms::prelude::*, environments::prelude::*, utils::{self, cli::*}};
 
 
 
@@ -17,8 +17,11 @@ fn main() {
     match config.action {
         utils::cli::Action::SolutionVisualization(output_config) => {
             // ----------------------- Initialization ----------------------------------------
-            let mut algo = load_algo(&config.algo);
+            let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
             let mut environment: Box<dyn EnvironmentTrait<Environment2dState, Environment2dActions>> = Box::new(generate_environment(&config.env));
+
+            println!("Algo type loaded: {:?}", algo.get_type());
+            println!("Epochs: {:?}", config.training.epochs);
 
             // ----------------------- Training ----------------------------------------
             println!("Training...");
@@ -28,7 +31,7 @@ fn main() {
 
             // ----------------------- Visualization ----------------------------------------
             environment.reset();
-            for _ in 0..algo.max_steps_per_epoch {
+            for _ in 0..config.training.max_steps_per_epoch {
                 let action = algo.best_action(&environment.get_state(), &Environment2dActions::get_all_actions());
                 if let Some(action) = action {
                     let (_, terminated) = environment.step(action);
@@ -42,14 +45,14 @@ fn main() {
             std::fs::create_dir_all(output_config.saving_path.clone()).unwrap();
             std::fs::create_dir_all(output_config.saving_path.clone() + "frames/").unwrap();
 
-            algo.statistics.plot(&(output_config.saving_path.clone() + "rewards_plot.png"), "TabularQLearning over Discrete Grid", "epsilon", true, false, output_config.show_info_in_plot).unwrap();
+            algo.get_statistics().plot(&(output_config.saving_path.clone() + "rewards_plot.png"), "TabularQLearning over Discrete Grid", "epsilon", true, false, output_config.show_info_in_plot).unwrap();
             environment.plot(&(output_config.saving_path.clone() + "solution.png")).unwrap();
             if output_config.create_video {
                 environment.real_time_video(&(output_config.saving_path.clone() + "frames/"), &(output_config.saving_path.clone() + "solution.mp4")).unwrap();
             }
             std::fs::write(
                 &(output_config.saving_path.clone() + "model.json"), 
-                serde_json::to_string_pretty(&algo).unwrap()
+                algo.to_json()
             ).unwrap();
 
             std::fs::remove_dir_all(output_config.saving_path.clone() + "frames/").unwrap();
@@ -60,22 +63,45 @@ fn main() {
 }
 
 
-fn load_algo(algo_initialization: &AlgoInitialization) -> DeepQLearning<Environment2dState, Environment2dActions> {
+fn load_algo(algo_initialization: &AlgoInitialization, max_steps_per_epoch: usize) -> Box<dyn RLAlgorithmTrait<Environment2dState, Environment2dActions>> {
     match algo_initialization {
         AlgoInitialization::Load { path } => {
             let json = std::fs::read_to_string(path).unwrap();
-            serde_json::from_str(&json).unwrap()
+            let header: AlgoHeader = serde_json::from_str(&json).unwrap();
+            
+            match header.algo_type {
+                rl::RlAlgoType::TabularQTable => {panic!("Does not accept Tabular Learning")},
+                rl::RlAlgoType::DeepQ => {let a: DeepQLearning<Environment2dState, Environment2dActions> = serde_json::from_str(&json).unwrap(); Box::new(a)},
+                rl::RlAlgoType::PPO => {let a: PPO<Environment2dState, Environment2dActions> = serde_json::from_str(&json).unwrap(); Box::new(a)},
+                rl::RlAlgoType::Evolutionary => {let a: EvolutionaryAlgorithm<Environment2dState, Environment2dActions> = serde_json::from_str(&json).unwrap(); Box::new(a)},
+            }
         },
         AlgoInitialization::FromConfig(algo_type) => {
             match algo_type {
                 AlgoType::DeepQLearning(algo_config) => {
-                    DeepQLearning::new(
-                        algo_config.min_e, algo_config.decay_rate_e, algo_config.learning_rate, algo_config.reward_discount_factor, algo_config.max_steps_per_epoch,
+                    Box::new(DeepQLearning::new(
+                        algo_config.min_e, algo_config.decay_rate_e, algo_config.learning_rate, algo_config.reward_discount_factor, max_steps_per_epoch,
                         algo_config.batch_size, algo_config.n_rollouts, algo_config.n_epochs, algo_config.n_epochs_to_update_target,
                         tch::Device::Cpu, algo_config.replay_memory_capacity, algo_config.q_network_layers.clone()
-                    )
+                    ))
                 }
-                _ => panic!("Only accepts DeepQ")
+                AlgoType::PPO(algo_config) => {
+                    Box::new(PPO::new(
+                        tch::Device::Cpu, algo_config.actor_lr, algo_config.critic_lr, 
+                        algo_config.lmbda, algo_config.epochs, algo_config.batch_size, algo_config.mini_batch_size, 
+                        algo_config.epsilon, algo_config.gamma, 
+                        algo_config.current_entropy_weight, algo_config.min_entropy, algo_config.decay_rate_entropy, 
+                        max_steps_per_epoch, algo_config.actor_layers.clone(), algo_config.critic_layers.clone()
+                    ))
+                }
+                AlgoType::Evolutionary(algo_config) => {
+                    Box::new(EvolutionaryAlgorithm::new(
+                        &algo_config.nn_layers, algo_config.population_size, algo_config.elite_count, 
+                        algo_config.mutation_rate, algo_config.mutation_strength, algo_config.min_mutation_strength, algo_config.mutation_strength_decay, 
+                        max_steps_per_epoch,
+                    ))
+                }
+                _ => panic!("Does not accept Tabular Learning")
             }
         },
     }

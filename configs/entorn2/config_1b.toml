@@ -1,0 +1,42 @@
+[algo.FromConfig.PPO]
+actor_layers = [8, 128, 3]
+critic_layers = [8, 128, 1]
+actor_lr = 5e-4
+critic_lr = 5e-4
+lmbda = 0.95
+epochs = 16
+batch_size = 2
+mini_batch_size = 64
+epsilon = 0.2
+gamma = 0.99
+current_entropy_weight = 0.01
+min_entropy = 0.001
+decay_rate_entropy = 0.995
+
+
+[env.Plane]
+width = 10.0
+height = 10.0
+start_x = 0.0
+start_y = 0.0
+goal_x = 8.0
+goal_y = 8.0
+n_rays = 5
+length_ray = 2.0
+ray_span = 1.57 # In radians
+reward_type = "Gradient"
+
+obstacles = [
+    # [3.0, 5.0]
+]
+
+
+[training]
+epochs = 100
+max_steps_per_epoch = 1000
+
+
+[action.SolutionVisualization]
+saving_path = "./assets/"
+show_info_in_plot = true
+create_video = true
