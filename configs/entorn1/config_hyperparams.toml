@@ -1,14 +1,11 @@
-[algo.FromConfig]
-type = "tabular_q_learning"
-
-min_e = 0.1
-decay_rate_e = 0.99
+[algo.FromConfig.TabularQLearning]
+min_e = 1e-3
+decay_rate_e = 0.995
 learning_rate = 0.2
 reward_discount_factor = 0.99
-max_steps_per_epoch = 250
 
 
-[env]
+[env.Grid]
 width = 10
 height = 10
 
@@ -22,11 +19,13 @@ reward_type = "Flat"
 
 
 [training]
-epochs = 2000
+epochs = 1000
+max_steps_per_epoch = 250
+seed = 0
 
 
 [action.CheckHyperparametersEffect]
 saving_path = "./assets/"
 learning_rates = [1e-3, 0.1, 0.5, 0.9]
-reward_discount_factors = [0.1, 0.5, 0.9, 0.99]
+reward_discount_factors = [0.1, 0.5, 0.9, 1.0]
 epsilon_decays = [0.5, 0.9, 0.99, 0.999]

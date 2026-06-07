@@ -2,7 +2,7 @@
 path = "./assets/model.json"
 
 
-[env]
+[env.Grid]
 width = 15
 height = 15
 
@@ -17,9 +17,12 @@ reward_type = "Flat"
 
 [training]
 epochs = 0
+max_steps_per_epoch = 250
+seed = 1
 
 
 [action.SolutionVisualization]
 saving_path = "./assets/"
 show_info_in_plot = false
 create_video = true
+plot_title = "TabularQLearning over Discrete Grid"

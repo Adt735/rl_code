@@ -427,7 +427,7 @@ where
     S: Clone + Default + State + Serialize + DeserializeOwned,
     A: Clone + Default + Hash + Action + Eq + Copy + Serialize + DeserializeOwned,
 {
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>) {
+    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, _rng: &mut dyn rand::rand_core::Rng) {
         self.ensure_optimizers();
 
         let mut rollouts = Vec::with_capacity(self.batch_size.max(1));

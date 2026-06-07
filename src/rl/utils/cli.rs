@@ -149,6 +149,7 @@ pub struct PlaneEnvConfig {
 pub struct TrainingConfig {
     pub epochs: usize,
     pub max_steps_per_epoch: usize,
+    pub seed: Option<u64>
 }
 
 
@@ -170,6 +171,7 @@ pub struct OutputConfig {
     pub saving_path: String,
     pub show_info_in_plot: bool,
     pub create_video: bool,
+    pub plot_title: String,
 }
 
 #[derive(Deserialize)]

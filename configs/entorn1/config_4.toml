@@ -1,13 +1,11 @@
-[algo.FromConfig]
-type = "tabular_q_learning"
-
+[algo.FromConfig.TabularQLearning]
 min_e = 0.1
-decay_rate_e = 0.999
+decay_rate_e = 0.9995
 learning_rate = 0.2
 reward_discount_factor = 0.99
-max_steps_per_epoch = 250000
 
-[env]
+
+[env.Grid]
 width = 50
 height = 50
 
@@ -23,6 +21,7 @@ reward_type = "Flat"
 
 [training]
 epochs = 5000
+max_steps_per_epoch = 250000
 
 
 [action.GetResourceUsageStatistics]

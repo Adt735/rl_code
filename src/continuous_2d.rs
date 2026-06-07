@@ -16,6 +16,8 @@ fn main() {
 
     match config.action {
         utils::cli::Action::SolutionVisualization(output_config) => {
+            let mut rng = rand::rng();
+
             // ----------------------- Initialization ----------------------------------------
             let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
             let mut environment: Box<dyn EnvironmentTrait<Environment2dState, Environment2dActions>> = Box::new(generate_environment(&config.env));
@@ -26,7 +28,7 @@ fn main() {
             // ----------------------- Training ----------------------------------------
             println!("Training...");
             for _ in (0..config.training.epochs).progress() {
-                algo.train_epoch(&mut environment);
+                algo.train_epoch(&mut environment, &mut rng);
             }
 
             // ----------------------- Visualization ----------------------------------------

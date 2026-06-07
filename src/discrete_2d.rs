@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use clap::Parser;
 use indicatif::ProgressIterator;
 use nalgebra::Vector2;
+use rand::{SeedableRng, rngs::{StdRng, ThreadRng}};
 use rl::{*, algorithms::prelude::*, environments::prelude::*};
 
 use crate::rl::utils::{cli::*, plots, prelude::Statistics};
@@ -15,11 +16,13 @@ fn main() {
     // Parser for a Command Line App
     let cli = Cli::parse();
     let content = std::fs::read_to_string(cli.config).unwrap();
-    let config: Config = toml::from_str(&content).unwrap();
+    let mut config: Config = toml::from_str(&content).unwrap();
 
 
     match config.action {
         utils::cli::Action::SolutionVisualization(output_config) => {
+            let mut rng = initialize_random_generator(config.training.seed);
+
             // ----------------------- Initialization ----------------------------------------
             let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
             let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
@@ -27,7 +30,7 @@ fn main() {
             // ----------------------- Training ----------------------------------------
             println!("Training...");
             for _ in (0..config.training.epochs).progress() {
-                algo.train_epoch(&mut environment);
+                algo.train_epoch(&mut environment, &mut rng);
             }
 
             // ----------------------- Visualization ----------------------------------------
@@ -46,7 +49,7 @@ fn main() {
             std::fs::create_dir_all(output_config.saving_path.clone()).unwrap();
             std::fs::create_dir_all(output_config.saving_path.clone() + "frames/").unwrap();
 
-            algo.statistics.plot(&(output_config.saving_path.clone() + "rewards_plot.png"), "TabularQLearning over Discrete Grid", "epsilon", true, false, output_config.show_info_in_plot).unwrap();
+            algo.statistics.plot(&(output_config.saving_path.clone() + "rewards_plot.png"), &output_config.plot_title, "epsilon", true, false, output_config.show_info_in_plot).unwrap();
             environment.plot(&(output_config.saving_path.clone() + "solution.png")).unwrap();
             if output_config.create_video {
                 environment.real_time_video(&(output_config.saving_path.clone() + "frames/"), &(output_config.saving_path.clone() + "solution.mp4")).unwrap();
@@ -61,6 +64,10 @@ fn main() {
 
         utils::cli::Action::CompareEnvironmentRewardType(compare_config) => {
             let statistics_series = GridRewardType::ALL.map(|reward_type| {
+                if let EnvironmentType::Grid(config) = &mut config.env {
+                    config.reward_type = reward_type
+                }
+
                 // ----------------------- Initialization ----------------------------------------
                 let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
 
@@ -68,12 +75,12 @@ fn main() {
                 // this trains n algorithms and unifies their statistics
                 let statistics = Statistics::mean_statistics(
                 (0..compare_config.n_iterations).map(|_| {
-                        let algo_config = &config.algo;
+                        let mut rng = initialize_random_generator(config.training.seed);
 
                         let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
 
                         for _ in 0..config.training.epochs {
-                            algo.train_epoch(&mut environment);
+                            algo.train_epoch(&mut environment, &mut rng);
                         }
 
                         algo.statistics
@@ -109,6 +116,7 @@ fn main() {
             for alpha in &hyperparams_config.learning_rates {
                 for gamma in &hyperparams_config.reward_discount_factors {
                     println!("Running Q-Learning for Alpha: {}, Gamma: {}", alpha, gamma);
+                    let mut rng = initialize_random_generator(config.training.seed);
 
                     // ----------------------- Initialization ----------------------------------------
                     let mut algo = TabularQLearning::new(
@@ -118,7 +126,7 @@ fn main() {
                     );
 
                     for _ in 0..config.training.epochs {
-                        algo.train_epoch(&mut environment);
+                        algo.train_epoch(&mut environment, &mut rng);
                     }
                     
                     results.push((alpha.clone(), gamma.clone(), algo.q_mat.clone()));
@@ -127,6 +135,7 @@ fn main() {
 
             for e_decay in hyperparams_config.epsilon_decays {
                 println!("Running Q-Learning for decay: {}", e_decay);
+                let mut rng = initialize_random_generator(config.training.seed);
 
                 // ----------------------- Initialization ----------------------------------------
                 let mut algo = TabularQLearning::new(
@@ -136,7 +145,7 @@ fn main() {
                 );
 
                 for _ in 0..config.training.epochs {
-                    algo.train_epoch(&mut environment);
+                    algo.train_epoch(&mut environment, &mut rng);
                 }
                 
                 decay_results.push((format!("{e_decay}"), algo.statistics.clone()));
@@ -165,14 +174,16 @@ fn main() {
             let mut elapsed = Vec::new();
             let mut memory = Vec::new();
             println!("Starting training");
-            for _ in (0..usage_config.tries).progress() {
+            for i in (0..usage_config.tries).progress() {
+                let mut rng = initialize_random_generator(config.training.seed.and_then(|seed| Some(seed + i as u64)));
+
                 // ----------------------- Initialization ----------------------------------------
                 let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
                 let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
 
                 // ----------------------- Training ----------------------------------------
                 for _ in 0..config.training.epochs {
-                    algo.train_epoch(&mut environment);
+                    algo.train_epoch(&mut environment, &mut rng);
                 }
                 
                 // ----------------------- Saving ----------------------------------------
@@ -232,5 +243,12 @@ fn generate_environment(env_type: &EnvironmentType) -> SimpleGridEnvironment {
             )
         }
         _ => panic!("This executable only accepts Plain Environment")
+    }
+}
+
+fn initialize_random_generator(seed: Option<u64>) -> StdRng {
+    match seed {
+        Some(seed) => StdRng::seed_from_u64(seed),
+        None => { StdRng::from_rng(&mut rand::rng()) },
     }
 }

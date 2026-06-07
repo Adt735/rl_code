@@ -1,5 +1,6 @@
 use std::{collections::HashMap, hash::Hash};
 
+use rand::{RngExt, seq::IndexedRandom};
 use serde::{Serialize, Deserialize};
 use serde_with::serde_as;
 
@@ -48,7 +49,7 @@ impl<S: State + Hash + Eq + Serialize + DeserializeOwned, A: Action + Hash + Eq 
     }
 }
 impl<S: State + Hash + Eq + Clone + Send + Sync + Serialize + DeserializeOwned, A: Action + Hash + Eq + Copy + Send + Sync + Serialize + DeserializeOwned> RLAlgorithmTrait<S, A> for TabularQLearning<S, A> {
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>) {
+    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, rng: &mut dyn rand::rand_core::Rng) {
         let mut rewards = Vec::with_capacity(self.max_steps_per_epoch);
         let mut steps = 0;
         loop {
@@ -56,12 +57,12 @@ impl<S: State + Hash + Eq + Clone + Send + Sync + Serialize + DeserializeOwned, 
             let possible_actions = A::get_all_actions();
     
             // Greedy epsilon
-            let action = if fastrand::f32() < self.current_e {
+            let action = if rng.random_bool(self.current_e as f64) {
                 None
             } else {
                 self.best_action(&agent_pos, &possible_actions)
             };
-            let action = action.unwrap_or_else(|| *fastrand::choice(&possible_actions).unwrap());
+            let action = action.unwrap_or_else(|| *possible_actions.choose(rng).unwrap());
     
             let (reward, terminated) = environment.step(action);
             rewards.push(reward);

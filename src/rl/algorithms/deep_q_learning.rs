@@ -1,7 +1,7 @@
 use std::hash::Hash;
 
 use ndarray::Array1;
-use rand::seq::index::sample;
+use rand::{RngExt, seq::{IndexedRandom, index::sample}};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::DeserializeOwned};
 use tch::{Device, Tensor, nn::{self, AdamW, Module, OptimizerConfig}};
 
@@ -68,7 +68,7 @@ where
         }
     }
 
-    pub fn rollout(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>) {
+    pub fn rollout(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, rng: &mut dyn rand::rand_core::Rng) {
         environment.reset();
         let mut rewards = Vec::with_capacity(self.max_steps_per_epoch);
         let mut current_state = environment.get_state();
@@ -78,12 +78,12 @@ where
         while k < self.n_rollouts {
             let possible_actions = A::get_all_actions();
 
-            let action = if fastrand::f32() < self.current_e {
+            let action = if rng.random_bool(self.current_e as f64) {
                 None
             } else {
                 self._best_action(&current_state, &possible_actions)
             };
-            let action = action.unwrap_or_else(|| *fastrand::choice(&possible_actions).unwrap());
+            let action = action.unwrap_or_else(|| *possible_actions.choose(rng).unwrap());
 
             let (reward, terminated) = environment.step(action);
             rewards.push(reward);
@@ -106,10 +106,10 @@ where
         self.current_e = self.min_e.max(self.decay_rate_e * self.current_e);
     }
 
-    pub fn learn(&mut self) {   
+    pub fn learn(&mut self, rng: &mut dyn rand::rand_core::Rng) {   
         for _ in 0..self.n_epochs {
             let (obs, action, next_obs, reward, terminated, truncated) =
-                self.replay_memory.sample(self.batch_size);
+                self.replay_memory.sample(self.batch_size, rng);
             let q_values = self.q_network.forward(&obs);
     
             // Forward pass target network without gradients
@@ -191,13 +191,13 @@ where
     // Vec<S>: ToTensor,
     // Vec<A>: ToTensor,
 {
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>) {
+    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, rng: &mut dyn rand::rand_core::Rng) {
         if self.optimizer.is_none() {
             self.optimizer = Some(nn::AdamW::default().build(&self.q_network.vs, self.optimizer_learning_rate as f64).unwrap());
         }
 
-        self.rollout(environment);
-        self.learn();
+        self.rollout(environment, rng);
+        self.learn(rng);
     }
 
     fn best_action(&self, state: &S, actions: &[A]) -> Option<A> {
@@ -286,9 +286,8 @@ where
         self.size = self.size.min(self.capacity - 1) + 1;
     }
 
-    pub fn sample(&self, batch_size: usize) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor) {
-        let mut rng = rand::rng();
-        let indices = sample(&mut rng, self.size, batch_size);
+    pub fn sample(&self, batch_size: usize, rng: &mut dyn rand::rand_core::Rng) -> (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor) {
+        let indices = sample(rng, self.size, batch_size);
 
         let mut states_vec = Vec::with_capacity(batch_size);
         let mut next_states_vec = Vec::with_capacity(batch_size);

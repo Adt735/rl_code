@@ -176,7 +176,7 @@ where
     A: Action + Serialize + DeserializeOwned,
 {
     /// One epoch = evaluate the whole population once and produce a new generation.
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>) {
+    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, _rng: &mut dyn rand::rand_core::Rng) {
         let mut best_reward = f32::NEG_INFINITY;
         let mut best_network = self.population[0].clone();
         let mut generation_rewards = Vec::with_capacity(self.population_size);

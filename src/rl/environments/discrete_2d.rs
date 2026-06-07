@@ -43,6 +43,7 @@ pub struct SimpleGridEnvironment {
 
     pub width: i32,
     pub height: i32,
+    pub weight: f32,
     pub walls: HashSet<(Vector2<i32>, GridActions)>,
     pub trajectory: Vec<Vector2<i32>>,
 
@@ -50,18 +51,21 @@ pub struct SimpleGridEnvironment {
 }
 impl SimpleGridEnvironment {
     pub fn new(width: usize, height: usize, agent: Vector2<i32>, goal: Vector2<i32>, walls: HashSet<(Vector2<i32>, GridActions)>, reward_type: GridRewardType) -> Self {
-        Self {
+        let mut s = Self {
             agent_pos: agent,
             goal_pos: goal,
             initial_agent_pos: agent,
 
             width: width as i32,
             height: height as i32,
+            weight: 0.0,
             walls,
             trajectory: Vec::with_capacity(width * height),
 
             reward_type,
-        }
+        };
+        s.weight = s.compute_reward_weight();
+        s
     }
 
     /// Helper function to know if the agent bumped into a wall
@@ -70,6 +74,31 @@ impl SimpleGridEnvironment {
         if self.walls.contains(&(state + action.to_vec(), action.opposite())) { return true }
 
         false
+    }
+
+    fn compute_reward_weight(&self) -> f32 {
+        match self.reward_type {
+            GridRewardType::Flat => {
+                let total_steps = (self.width * self.height - 1) as f32;
+                100.0 / total_steps
+            }
+            GridRewardType::Gradient => {
+                let mut total_unweighted_penalty = 0.0;
+                
+                for x in 0..self.width {
+                    for y in 0..self.height {
+                        // Skip the initial position since no step reward happens there
+                        if x as i32 == self.initial_agent_pos.x && y as i32 == self.initial_agent_pos.y {
+                            continue;
+                        }
+                        let dx = (x as i32 - self.goal_pos.x).abs();
+                        let dy = (y as i32 - self.goal_pos.y).abs();
+                        total_unweighted_penalty += (dx + dy) as f32;
+                    }
+                }
+                100.0 / total_unweighted_penalty
+            }
+        }
     }
 
     /// Useful for creating the real-time video
@@ -317,26 +346,25 @@ impl EnvironmentTrait<GridState, GridActions> for SimpleGridEnvironment {
 
     /// Advance the agent in the given direction (except if it jumps into a wall)
     fn step(&mut self, action: GridActions) -> (f32, bool) {
-        let out_of_margin_reward = match self.reward_type {
-            GridRewardType::Flat => -10.0,
-            GridRewardType::Gradient => -((self.width * self.height) as f32),
+        let collides_with_wall = self.collides_with_wall(self.agent_pos, action);
+
+        let checked_target_pos = if collides_with_wall { self.agent_pos } else { 
+            let target_pos = self.agent_pos + action.to_vec();
+            Vector2::new(
+                target_pos.x.clamp(0, self.width - 1),
+                target_pos.y.clamp(0, self.height - 1),
+            )
         };
 
-        if self.collides_with_wall(self.agent_pos, action) {
-            return (out_of_margin_reward, false)
-        }
+        let mut reward = if checked_target_pos == self.goal_pos { // Won round
+            let initial_diff = self.goal_pos - self.initial_agent_pos;
+            let initial_dist = (initial_diff.x.abs() + initial_diff.y.abs()) as f32;
 
-        let target_pos = self.agent_pos + action.to_vec();
-        let checked_target_pos = Vector2::new(
-            target_pos.x.clamp(0, self.width - 1),
-            target_pos.y.clamp(0, self.height - 1),
-        );
-
-        let reward = if checked_target_pos == self.agent_pos { // Out of margins
-            out_of_margin_reward 
-        } else if checked_target_pos == self.goal_pos { // Won round
-            100.0
-        } else { // Goal is to minimize, route, so every step taken is "bad"
+            match self.reward_type {
+                GridRewardType::Flat => initial_dist - 1.0,
+                GridRewardType::Gradient => (initial_dist * (initial_dist - 1.0)) / 2.0,
+            }
+        } else { // Goal is to minimize route, so every step taken is "bad"
             match self.reward_type {
                 GridRewardType::Flat => -1.0,
                 GridRewardType::Gradient => {
@@ -345,6 +373,8 @@ impl EnvironmentTrait<GridState, GridActions> for SimpleGridEnvironment {
                 }
             }
         };
+        // Scale the reward using the computed weight
+        reward *= self.weight;
 
         self.trajectory.push(checked_target_pos);
         self.agent_pos = checked_target_pos;
@@ -446,32 +476,6 @@ impl ToTensor for GridActions {
 #[derive(Clone, Default, Debug, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GridState {
     pub direction_to_goal: Vector2<i32>,
-
-    // /// Up, Right, Down, Left
-    // pub walls: [bool; 4],
-    // pub visited: [bool; 4],
-    // pub agent_pos: IVec2,
-    // pub goal_pos: IVec2,
-}
-impl GridState {
-    pub fn size() -> usize {
-        2
-        // 2 + 4 + 4
-        // 4
-    }
-
-    pub fn to_vec(&self) -> Vec<f32> {
-        let mut data: Vec<f32> = Vec::with_capacity(Self::size());
-        data.extend(&[self.direction_to_goal.x as f32, self.direction_to_goal.y as f32]);
-
-        // data.extend(&self.walls.map(|x| if x { 1.0 } else { 0.0 }));
-        // data.extend(&self.visited.map(|x| if x { 1.0 } else { 0.0 }));
-
-        // data.extend(&[self.agent_pos.x as f32, self.agent_pos.y as f32]);
-        // data.extend(&[self.goal_pos.x as f32, self.goal_pos.y as f32]);
-
-        data
-    }
 }
 impl State for GridState {}
 impl ToTensor for GridState {
