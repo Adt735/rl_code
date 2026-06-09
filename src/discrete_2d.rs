@@ -49,7 +49,9 @@ fn main() {
             std::fs::create_dir_all(output_config.saving_path.clone()).unwrap();
             std::fs::create_dir_all(output_config.saving_path.clone() + "frames/").unwrap();
 
-            algo.statistics.plot(&(output_config.saving_path.clone() + "rewards_plot.png"), &output_config.plot_title, "epsilon", true, false, output_config.show_info_in_plot).unwrap();
+            for (i, plot) in output_config.plots.iter().enumerate() {
+                algo.statistics.plot(&format!("{}metric_{i}_plot.png", output_config.saving_path.clone()), &plot.0, &plot.1, plot.2).unwrap();
+            }
             environment.plot(&(output_config.saving_path.clone() + "solution.png")).unwrap();
             if output_config.create_video {
                 environment.real_time_video(&(output_config.saving_path.clone() + "frames/"), &(output_config.saving_path.clone() + "solution.mp4")).unwrap();
@@ -95,6 +97,7 @@ fn main() {
             Statistics::plot_multiple(
                 &(compare_config.saving_path.clone() + "comparison_plot.png"), 
                 "TabularQLearning over Discrete Grid RewardType comparison", 
+                "Reward",
                 &statistics_series
             ).unwrap()
         }
@@ -164,6 +167,7 @@ fn main() {
             Statistics::plot_multiple(
                 &(hyperparams_config.saving_path.clone() + "hyper_e_check.png"), 
                 "Epsilon decay rate comparison", 
+                "Reward",
                 &decay_results
             ).unwrap();
         }
@@ -182,14 +186,16 @@ fn main() {
                 let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
 
                 // ----------------------- Training ----------------------------------------
+                let start = std::time::Instant::now();
                 for _ in 0..config.training.epochs {
                     algo.train_epoch(&mut environment, &mut rng);
                 }
+                let elapsed_single = (std::time::Instant::now() - start).as_secs_f32();
                 
                 // ----------------------- Saving ----------------------------------------
-                reward.push(algo.statistics.history.last().unwrap().reward_sum);
-                success.push(algo.statistics.history.last().unwrap().success as usize);
-                elapsed.push(algo.statistics.history.last().unwrap().elapsed);
+                reward.push(algo.statistics.last_value("Reward").unwrap_or(0.0));
+                success.push(algo.statistics.last_completed().unwrap_or(false) as usize);
+                elapsed.push(elapsed_single);
                 memory.push(algo.get_memory_usage());
             }
 

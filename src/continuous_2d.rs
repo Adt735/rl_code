@@ -47,7 +47,9 @@ fn main() {
             std::fs::create_dir_all(output_config.saving_path.clone()).unwrap();
             std::fs::create_dir_all(output_config.saving_path.clone() + "frames/").unwrap();
 
-            algo.get_statistics().plot(&(output_config.saving_path.clone() + "rewards_plot.png"), "TabularQLearning over Discrete Grid", "epsilon", true, false, output_config.show_info_in_plot).unwrap();
+            for (i, plot) in output_config.plots.iter().enumerate() {
+                algo.get_statistics().plot(&format!("{}metric_{i}_plot.png", output_config.saving_path.clone()), &plot.0, &plot.1, plot.2).unwrap();
+            }
             environment.plot(&(output_config.saving_path.clone() + "solution.png")).unwrap();
             if output_config.create_video {
                 environment.real_time_video(&(output_config.saving_path.clone() + "frames/"), &(output_config.saving_path.clone() + "solution.mp4")).unwrap();

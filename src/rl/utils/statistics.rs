@@ -1,402 +1,415 @@
-use std::{fs::File, time, io::Write};
+use std::collections::{BTreeMap, BTreeSet};
 
 use plotters::prelude::*;
 
-use crate::rl::utils::prelude::count_files;
-
-
 const COLORS: [&RGBColor; 6] = [&RED, &BLUE, &GREEN, &MAGENTA, &CYAN, &BLACK];
 const N_BUCKETS: usize = 10;
+const PLOT_WIDTH: u32 = 1024;
+const PLOT_HEIGHT: u32 = 1024;
+
+#[derive(Clone, Debug)]
+pub struct StatPoint {
+    pub episode: u32,
+    pub completed: bool,
+    pub values: Vec<(String, f32)>,
+}
+
+impl StatPoint {
+    pub fn new(episode: u32, completed: bool, values: Vec<(String, f32)>) -> Self {
+        Self {
+            episode,
+            completed,
+            values,
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<f32> {
+        self.values
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| *v)
+    }
+}
 
 #[derive(Debug)]
 struct Bucket {
     episode: u32,
-    reward: f32,
-    elapsed: f32,
-    info: f32,
-    success_rate: f32,
+    completed_rate: f32,
+    values: Vec<(String, f32)>,
 }
-
-
-#[derive(Clone)]
-pub struct StatPoint {
-    pub episode: u32,
-    pub reward_sum: f32,
-    pub success: bool,
-    pub elapsed: f32,
-    pub info: f32,
-}
-
 
 #[derive(Clone, Default)]
 pub struct Statistics {
-    pub start_time: Option<time::Instant>,
     pub history: Vec<StatPoint>,
 }
+
 impl Statistics {
     pub fn mean_statistics(all: Vec<Statistics>) -> Statistics {
         if all.is_empty() {
             return Statistics::default();
         }
 
-        let n_runs = all.len() as f32;
-        let n_points = all[0].history.len();
+        let n_points = all
+            .iter()
+            .map(|s| s.history.len())
+            .min()
+            .unwrap_or(0);
 
+        if n_points == 0 {
+            return Statistics::default();
+        }
+
+        let n_runs = all.len() as f32;
         let mut history = Vec::with_capacity(n_points);
 
         for i in 0..n_points {
             let episode = all[0].history[i].episode;
 
-            let reward_sum = all
+            let completed_rate = all
                 .iter()
-                .map(|s| s.history[i].reward_sum)
+                .map(|s| s.history[i].completed as u32 as f32)
                 .sum::<f32>()
                 / n_runs;
 
-            let success_rate = all
-                .iter()
-                .map(|s| s.history[i].success as u32 as f32)
-                .sum::<f32>()
-                / n_runs;
+            let mut keys = BTreeSet::new();
+            for s in &all {
+                for (k, _) in &s.history[i].values {
+                    keys.insert(k.clone());
+                }
+            }
 
-            let elapsed = all
-                .iter()
-                .map(|s| s.history[i].elapsed)
-                .sum::<f32>()
-                / n_runs;
+            let mut values = Vec::new();
+            for key in keys {
+                let mut sum = 0.0f32;
+                let mut count = 0usize;
 
-            let info = all
-                .iter()
-                .map(|s| s.history[i].info)
-                .sum::<f32>()
-                / n_runs;
+                for s in &all {
+                    if let Some(v) = s.history[i].get(&key) {
+                        sum += v;
+                        count += 1;
+                    }
+                }
+
+                if count > 0 {
+                    values.push((key, sum / count as f32));
+                }
+            }
 
             history.push(StatPoint {
                 episode,
-                reward_sum,
-                success: success_rate >= 0.5,
-                elapsed,
-                info,
+                completed: completed_rate >= 0.5,
+                values,
             });
         }
 
-        Statistics {
-            start_time: None,
-            history,
+        Statistics { history }
+    }
+
+    pub fn push(&mut self, completed: bool, values: Vec<(String, f32)>) {
+        let episode = self.history.len() as u32;
+        self.history.push(StatPoint::new(episode, completed, values));
+    }
+
+    pub fn last_value(&self, metric: &str) -> Option<f32> {
+        self.history
+            .last()
+            .and_then(|p| p.get(metric))
+    }
+
+    /// Retorna si l'últim episodi ha completat l'entorn.
+    pub fn last_completed(&self) -> Option<bool> {
+        self.history
+            .last()
+            .map(|p| p.completed)
+    }
+
+    pub fn add_metric_to_previous(
+        &mut self,
+        metric: impl Into<String>,
+        value: f32,
+    ) {
+        let metric = metric.into();
+
+        for point in self.history.iter_mut().rev() {
+            // Stop once the metric already exists
+            if point.get(&metric).is_some() {
+                break;
+            }
+
+            point.values.push((metric.clone(), value));
         }
     }
 
-    pub fn push(&mut self, rewards: &[f32], success: bool, info: f32) {
-        let episode = self.history.len();
-        if self.start_time.is_none() { self.start_time = Some(time::Instant::now()) }
-
-        self.history.push(StatPoint { 
-            episode: episode as u32,
-            reward_sum: rewards.iter().sum::<f32>(),
-            success, 
-            elapsed: self.start_time.unwrap().elapsed().as_secs_f32(), 
-            info,
-        });
-    }
-
     fn to_buckets(&self) -> Vec<Bucket> {
-        let bucket_size =
-            ((self.history.len() as f32) / (N_BUCKETS as f32))
-                .ceil() as usize;
-
+        let bucket_size = ((self.history.len() as f32) / (N_BUCKETS as f32)).ceil() as usize;
         let mut buckets = Vec::new();
 
         for chunk in self.history.chunks(bucket_size.max(1)) {
             let len = chunk.len() as f32;
+            let episode = chunk.last().unwrap().episode;
+            let completed_rate = chunk.iter().filter(|x| x.completed).count() as f32 / len;
+
+            let mut keys = BTreeSet::new();
+            for point in chunk {
+                for (k, _) in &point.values {
+                    keys.insert(k.clone());
+                }
+            }
+
+            let mut values = Vec::new();
+            for key in keys {
+                let mut sum = 0.0f32;
+                let mut count = 0usize;
+
+                for point in chunk {
+                    if let Some(v) = point.get(&key) {
+                        sum += v;
+                        count += 1;
+                    }
+                }
+
+                if count > 0 {
+                    values.push((key, sum / count as f32));
+                }
+            }
 
             buckets.push(Bucket {
-                episode: chunk.last().unwrap().episode,
-
-                reward: chunk
-                    .iter()
-                    .map(|x| x.reward_sum)
-                    .sum::<f32>()
-                    / len,
-
-                elapsed: chunk
-                    .iter()
-                    .map(|x| x.elapsed)
-                    .sum::<f32>()
-                    / len,
-
-                info: chunk
-                    .iter()
-                    .map(|x| x.info)
-                    .sum::<f32>()
-                    / len,
-
-                success_rate: chunk
-                    .iter()
-                    .filter(|x| x.success)
-                    .count() as f32
-                    / len as f32,
+                episode,
+                completed_rate,
+                values,
             });
         }
 
         buckets
     }
 
+    fn metric_points(buckets: &[Bucket], metric: &str) -> Vec<(u32, f32)> {
+        buckets
+            .iter()
+            .filter_map(|b| {
+                b.values
+                    .iter()
+                    .find(|(k, _)| k == metric)
+                    .map(|(_, v)| (b.episode, *v))
+            })
+            .collect()
+    }
+
     pub fn plot(
         &self,
         path: &str,
         title: &str,
-        info_name: &str,
-        show_reward: bool,
-        show_elapsed: bool,
-        show_info: bool,
+        series: &[(String, f32)],
+        color_by_completion: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if self.history.is_empty() {
+        if self.history.is_empty() || series.is_empty() {
             println!("Empty statistics");
             return Ok(());
         }
 
         let buckets = self.to_buckets();
+        if buckets.is_empty() {
+            println!("Empty buckets");
+            return Ok(());
+        }
 
-        // -------------------- Plot size --------------------------------------
-        let reward_height = if show_reward { 768 } else { 0 };
-        let elapsed_height = if show_elapsed { 256 } else { 0 };
-        let info_height = if show_info { 256 } else { 0 };
-
-        let total_height =
-            reward_height +
-            elapsed_height +
-            info_height;
-
-        let root = BitMapBackend::new(path, (1024, total_height))
-            .into_drawing_area();
-
+        let root = BitMapBackend::new(path, (PLOT_WIDTH, PLOT_HEIGHT)).into_drawing_area();
         root.fill(&WHITE)?;
 
-        let mut areas = Vec::new();
+        let mut weights: Vec<f32> = series.iter().map(|(_, h)| h.max(0.0)).collect();
+        if weights.iter().all(|w| *w <= 0.0) {
+            weights = vec![1.0; series.len()];
+        }
+
+        let total_weight = weights.iter().sum::<f32>().max(f32::EPSILON);
 
         let mut remaining = root;
+        let mut remaining_height = PLOT_HEIGHT;
+        let mut remaining_weight = total_weight;
+        let mut areas = Vec::with_capacity(series.len());
 
-        if show_reward {
-            let (reward_area, rest) =
-                remaining.split_vertically(reward_height);
+        for (idx, (_, weight)) in series.iter().enumerate() {
+            let is_last = idx + 1 == series.len();
 
-            areas.push(reward_area);
+            let raw_h = if is_last {
+                remaining_height
+            } else {
+                ((remaining_height as f32) * (*weight / remaining_weight)).round() as u32
+            };
+
+            let min_rest = (series.len() - idx - 1) as u32;
+            let h = raw_h
+                .max(1)
+                .min(remaining_height.saturating_sub(min_rest).max(1));
+
+            let (area, rest) = remaining.split_vertically(h);
+            areas.push(area);
             remaining = rest;
-        }
 
-        if show_elapsed {
-            let (elapsed_area, rest) =
-                remaining.split_vertically(elapsed_height);
-
-            areas.push(elapsed_area);
-            remaining = rest;
-        }
-
-        if show_info {
-            let (info_area, _) =
-                remaining.split_vertically(info_height);
-
-            areas.push(info_area);
+            remaining_height = remaining_height.saturating_sub(h);
+            remaining_weight -= *weight;
         }
 
         let x_min = buckets.first().unwrap().episode;
-        let x_max = buckets.last().unwrap().episode;
+        let x_max = buckets.last().unwrap().episode.max(x_min + 1);
 
-        let reward_min = buckets
-            .iter()
-            .map(|b| b.reward)
-            .fold(f32::INFINITY, f32::min);
+        for (idx, ((name, _), area)) in series.iter().zip(areas.iter()).enumerate() {
+            let points = Self::metric_points(&buckets, name);
 
-        let reward_max = buckets
-            .iter()
-            .map(|b| b.reward)
-            .fold(f32::NEG_INFINITY, f32::max);
+            if points.len() < 2 {
+                continue;
+            }
 
-        let mut area_idx = 0;
+            let (mut y_min, mut y_max) = points.iter().fold(
+                (f32::INFINITY, f32::NEG_INFINITY),
+                |(mn, mx), (_, v)| (mn.min(*v), mx.max(*v)),
+            );
 
-        //
-        // Reward Plot
-        //
-        if show_reward {
-            let area = &areas[area_idx];
-            area_idx += 1;
+            if (y_max - y_min).abs() < f32::EPSILON {
+                y_min -= 1.0;
+                y_max += 1.0;
+            } else {
+                let pad = (y_max - y_min) * 0.1;
+                y_min -= pad;
+                y_max += pad;
+            }
 
             let mut chart = ChartBuilder::on(area)
-                .caption(title, ("sans-serif", 30))
+                .caption(format!("{} — {}", title, name), ("sans-serif", 24))
                 .margin(20)
                 .x_label_area_size(40)
                 .y_label_area_size(60)
-                .build_cartesian_2d(
-                    x_min..x_max,
-                    reward_min..reward_max,
-                )?;
+                .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
 
             chart
                 .configure_mesh()
                 .x_desc("Episode")
-                .y_desc("Reward")
+                .y_desc(name)
                 .draw()?;
 
-            for pair in buckets.windows(2) {
-                let a = &pair[0];
-                let b = &pair[1];
+            if color_by_completion {
+                for pair in buckets.windows(2) {
+                    let a = &pair[0];
+                    let b = &pair[1];
 
-                let color = if (a.success_rate + b.success_rate) / 2.0 > 0.5 {
-                    &GREEN
-                } else {
-                    &RED
-                };
+                    let av = (a.completed_rate + b.completed_rate) / 2.0;
+                    let color = if av >= 0.5 { &GREEN } else { &RED };
 
-                chart.draw_series(std::iter::once(
-                    PathElement::new(
-                        vec![
-                            (a.episode, a.reward),
-                            (b.episode, b.reward),
-                        ],
-                        color.stroke_width(4),
-                    ),
-                ))?;
+                    let ya = a.values.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
+                    let yb = b.values.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
+
+                    if let (Some(ya), Some(yb)) = (ya, yb) {
+                        chart.draw_series(std::iter::once(PathElement::new(
+                            vec![(a.episode, ya), (b.episode, yb)],
+                            color.stroke_width(4),
+                        )))?;
+                    }
+                }
+            } else {
+                let color = COLORS[idx % COLORS.len()];
+                chart.draw_series(LineSeries::new(points, color.stroke_width(3)))?;
             }
         }
 
-        //
-        // Elapsed Plot
-        //
-        if show_elapsed {
-            let elapsed_min = buckets
-                .iter()
-                .map(|b| b.elapsed)
-                .fold(f32::INFINITY, f32::min);
-
-            let elapsed_max = buckets
-                .iter()
-                .map(|b| b.elapsed)
-                .fold(f32::NEG_INFINITY, f32::max);
-
-            let area = &areas[area_idx];
-            area_idx += 1;
-
-            let mut chart = ChartBuilder::on(area)
-                .caption("Elapsed Time", ("sans-serif", 25))
-                .margin(20)
-                .x_label_area_size(40)
-                .y_label_area_size(60)
-                .build_cartesian_2d(
-                    x_min..x_max,
-                    elapsed_min..elapsed_max,
-                )?;
-
-            chart
-                .configure_mesh()
-                .x_desc("Episode")
-                .y_desc("Seconds")
-                .draw()?;
-
-            chart.draw_series(LineSeries::new(
-                buckets.iter().map(|b| {
-                    (b.episode, b.elapsed)
-                }),
-                &BLUE,
-            ))?;
-        }
-
-        //
-        // Info Plot
-        //
-        if show_info {
-            let info_min = buckets
-                .iter()
-                .map(|b| b.info)
-                .fold(f32::INFINITY, f32::min);
-
-            let info_max = buckets
-                .iter()
-                .map(|b| b.info)
-                .fold(f32::NEG_INFINITY, f32::max);
-
-            let area = &areas[area_idx];
-
-            let mut chart = ChartBuilder::on(area)
-                .caption(info_name, ("sans-serif", 25))
-                .margin(20)
-                .x_label_area_size(40)
-                .y_label_area_size(60)
-                .build_cartesian_2d(
-                    x_min..x_max,
-                    info_min..info_max,
-                )?;
-
-            chart
-                .configure_mesh()
-                .x_desc("Episode")
-                .y_desc(info_name)
-                .draw()?;
-
-            chart.draw_series(LineSeries::new(
-                buckets.iter().map(|b| {
-                    (b.episode, b.info)
-                }),
-                &MAGENTA,
-            ))?;
-        }
-
         remaining.present()?;
-
         Ok(())
     }
 
-    pub fn plot_multiple(path: &str, title: &str, statistics_series: &[(String, Statistics)]) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn plot_multiple(
+        path: &str,
+        title: &str,
+        metric: &str,
+        statistics_series: &[(String, Statistics)],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if statistics_series.is_empty() {
+            return Ok(());
+        }
+
         let root = BitMapBackend::new(path, (1024, 768)).into_drawing_area();
         root.fill(&WHITE)?;
 
-        let buckets = statistics_series.iter().cloned().map(|(l, s)| (l, s.to_buckets())).collect::<Vec<_>>();
-        let buckets_flat = buckets.iter().map(|(l, b)| b).flatten().collect::<Vec<_>>();
-        let x_min = buckets_flat.first().unwrap().episode;
-        let x_max = buckets_flat.last().unwrap().episode;
+        let mut all_points: Vec<(String, Vec<Bucket>)> = Vec::new();
+        let mut x_min = u32::MAX;
+        let mut x_max = 0u32;
+        let mut any_points = false;
 
-        let reward_min = buckets_flat
-            .iter()
-            .map(|b| b.reward)
-            .fold(f32::INFINITY, f32::min);
-        let reward_max = buckets_flat
-            .iter()
-            .map(|b| b.reward)
-            .fold(f32::NEG_INFINITY, f32::max);
+        for (label, stats) in statistics_series {
+            let buckets = stats.to_buckets();
+            if let Some(first) = buckets.first() {
+                x_min = x_min.min(first.episode);
+            }
+            if let Some(last) = buckets.last() {
+                x_max = x_max.max(last.episode);
+            }
 
+            if !Self::metric_points(&buckets, metric).is_empty() {
+                any_points = true;
+            }
+
+            all_points.push((label.clone(), buckets));
+        }
+
+        if !any_points {
+            println!("No points for metric '{}'", metric);
+            return Ok(());
+        }
+
+        if x_min == u32::MAX {
+            x_min = 0;
+        }
+        if x_max <= x_min {
+            x_max = x_min + 1;
+        }
+
+        let mut y_min = f32::INFINITY;
+        let mut y_max = f32::NEG_INFINITY;
+
+        for (_, buckets) in &all_points {
+            for (_, v) in Self::metric_points(buckets, metric) {
+                y_min = y_min.min(v);
+                y_max = y_max.max(v);
+            }
+        }
+
+        if !y_min.is_finite() || !y_max.is_finite() {
+            return Ok(());
+        }
+
+        if (y_max - y_min).abs() < f32::EPSILON {
+            y_min -= 1.0;
+            y_max += 1.0;
+        } else {
+            let pad = (y_max - y_min) * 0.1;
+            y_min -= pad;
+            y_max += pad;
+        }
 
         let mut chart = ChartBuilder::on(&root)
             .caption(title, ("sans-serif", 30))
             .margin(20)
             .x_label_area_size(40)
             .y_label_area_size(60)
-            .build_cartesian_2d(
-                x_min..x_max,
-                reward_min..reward_max,
-            )?;
+            .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
+
         chart
             .configure_mesh()
             .x_desc("Episode")
-            .y_desc("Reward")
+            .y_desc(metric)
             .draw()?;
 
-        
-        for (idx, (label, statistics)) in statistics_series.iter().enumerate() {
+        for (idx, (label, buckets)) in all_points.iter().enumerate() {
             let color = COLORS[idx % COLORS.len()];
-            let buckets = statistics.to_buckets();
+            let points = Self::metric_points(buckets, metric);
 
-            let points: Vec<(u32, f32)> = buckets
-                .iter()
-                .map(|b| (b.episode, b.reward))
-                .collect();
+            if points.len() < 2 {
+                continue;
+            }
 
             chart
                 .draw_series(LineSeries::new(points, color.stroke_width(3)))?
                 .label(label.clone())
                 .legend(move |(x, y)| {
-                    PathElement::new(
-                        vec![(x, y), (x + 20, y)],
-                        color.stroke_width(3),
-                    )
+                    PathElement::new(vec![(x, y), (x + 20, y)], color.stroke_width(3))
                 });
         }
 
@@ -408,6 +421,7 @@ impl Statistics {
             .border_style(BLACK)
             .draw()?;
 
+        root.present()?;
         Ok(())
     }
 }

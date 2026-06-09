@@ -1,5 +1,5 @@
 [algo.FromConfig.Evolutionary]
-nn_layers = [8, 64, 3]
+nn_layers = [7, 64, 3]
 population_size = 100
 elite_count = 2
 mutation_rate = 0.2
@@ -32,5 +32,15 @@ max_steps_per_epoch = 1000
 
 [action.SolutionVisualization]
 saving_path = "./assets/"
-show_info_in_plot = true
 create_video = true
+plots = [
+    [
+        "DQL algorithm on plane",
+        [
+            ["Reward", 1.0],
+            ["Loss", 0.4],
+            # ["Epsilon", 0.2]
+        ],
+        true
+    ]
+]

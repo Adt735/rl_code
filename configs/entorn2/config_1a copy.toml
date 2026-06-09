@@ -1,13 +1,13 @@
 [algo.FromConfig.DeepQLearning]
 min_e = 0.05
 decay_rate_e = 0.995
-learning_rate = 1e-2
+learning_rate = 1e-3
 reward_discount_factor = 0.99
 
 batch_size = 256
-n_rollouts = 2000
-n_epochs = 4
-n_epochs_to_update_target = 50
+n_rollouts = 1000
+n_epochs = 8
+n_epochs_to_update_target = 8
 replay_memory_capacity = 20000
 q_network_layers = [2, 64, 3]
 
@@ -16,8 +16,8 @@ width = 10.0
 height = 10.0
 start_x = 0.0
 start_y = 0.0
-goal_x = 9.0
-goal_y = 9.0
+goal_x = 5.0
+goal_y = 5.0
 n_rays = 0
 length_ray = 2.0
 ray_span = 1.57 # In radians
@@ -29,9 +29,8 @@ obstacles = [
 
 
 [training]
-epochs = 500
+epochs = 750
 max_steps_per_epoch = 1000
-seed = 0
 
 
 [action.SolutionVisualization]

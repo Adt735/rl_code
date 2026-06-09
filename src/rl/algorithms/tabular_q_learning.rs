@@ -77,7 +77,13 @@ impl<S: State + Hash + Eq + Clone + Send + Sync + Serialize + DeserializeOwned, 
                 environment.reset();
     
                 // Update statistics
-                self.statistics.push(&rewards, terminated, self.current_e);
+                self.statistics.push(
+                    terminated,
+                    vec![
+                        ("Reward".to_string(), rewards.iter().sum::<f32>()),
+                        ("Epsilon".to_string(), self.current_e),
+                    ]
+                );
                 rewards.clear();
                 break;
             } else {

@@ -444,7 +444,13 @@ where
 
         // Keep the existing statistics API, but record the actual rollout rewards.
         // The `info` field is used here to track the current entropy coefficient.
-        self.statistics.push(&rewards_for_stats, success, self.current_entropy_weight);
+        self.statistics.push(
+            success,
+            vec![
+                ("Reward".to_string(), rewards_for_stats.iter().sum::<f32>()),
+                ("Epsilon".to_string(), self.current_entropy_weight),
+            ]
+        );
 
         self.update_policy(states, actions, old_log_probs, advantages, returns);
     }

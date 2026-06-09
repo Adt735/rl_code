@@ -196,7 +196,13 @@ where
         self.champion = best_network.clone();
         self.return_list.push(best_reward);
 
-        self.statistics.push(&generation_rewards, done, self.mutation_strength);
+        self.statistics.push(
+            done,
+            vec![
+                ("Reward".to_string(), generation_rewards.iter().sum::<f32>()),
+                ("Epsilon".to_string(), self.mutation_strength),
+            ]
+        );
 
         self.evolve_population(&best_network);
     }

@@ -97,7 +97,13 @@ where
                 current_state = environment.get_state();
                 n_steps_in_epoch = 0;
 
-                self.statistics.push(&rewards, terminated, self.current_e);
+                self.statistics.push(
+                    terminated,
+                    vec![
+                        ("Reward".to_string(), rewards.iter().sum::<f32>()),
+                        ("Epsilon".to_string(), self.current_e),
+                    ]
+                );
                 rewards.clear();
             }
 
@@ -107,6 +113,8 @@ where
     }
 
     pub fn learn(&mut self, rng: &mut dyn rand::rand_core::Rng) {   
+        let mut losses = Vec::with_capacity(self.n_epochs);
+
         for _ in 0..self.n_epochs {
             let (obs, action, next_obs, reward, terminated, truncated) =
                 self.replay_memory.sample(self.batch_size, rng);
@@ -136,8 +144,8 @@ where
             let target = &reward
                 + self.reward_discount_factor
                     * next_q_value
-                    * (1.0 - &terminated)
-                    * (1.0 - &truncated);
+                    * (1.0 - &terminated);
+                    // * (1.0 - &truncated);
     
             // Huber loss (smooth_l1_loss)
             let loss = q_value.smooth_l1_loss(
@@ -162,12 +170,10 @@ where
                 self.update_target();
             }
 
-            // Rrewards
-            let t = reward.to_device(Device::Cpu).to_kind(tch::Kind::Float);
-            let n = t.numel();
-            let mut data = vec![0f32; n];
-            t.copy_data(&mut data, n);
+            losses.push(loss.double_value(&[]));
         }
+
+        self.statistics.add_metric_to_previous("Loss", (losses.iter().sum::<f64>() / losses.len() as f64) as f32);
     }
 
     fn update_target(&mut self) {

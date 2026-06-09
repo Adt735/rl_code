@@ -38,6 +38,15 @@ impl PlaneRewardType {
     pub const ALL: [PlaneRewardType; 2] = [PlaneRewardType::Flat, PlaneRewardType::Gradient];
 }
 
+#[derive(Clone)]
+pub struct TrajectoryPoints {
+    pub position: Vec2,
+
+    /// (angle, detection)
+    pub rays: Vec<(f32, f32)>,
+    pub rays_length: f32
+}
+
 pub struct Simple2dEnvironment {
     pub rays: Vec<RayObservation2d>,
 
@@ -53,7 +62,7 @@ pub struct Simple2dEnvironment {
     pub agent_collider_handle: Option<ColliderHandle>,
 
     pub reward_type: PlaneRewardType,
-    pub trajectory: Vec<Vec2>
+    pub trajectory: Vec<TrajectoryPoints>
 }
 impl Simple2dEnvironment {
     pub fn new(
@@ -138,7 +147,45 @@ impl Simple2dEnvironment {
         self
     }
 
-    fn downsample_trajcetory(&self, max_points: usize) -> Vec<Vec2> {
+    fn get_rays_observation(&self) -> Vec<(f32, f32)> {
+        let simulation = self.simulation.as_ref().unwrap();
+        let agent = &simulation.bodies[self.agent_handle.unwrap()];
+
+        // ---------- Agent position -------------
+        let agent_pos = agent.position();
+        let agent_translation = agent_pos.translation;
+        let agent_rotation = agent_pos.rotation;
+
+        self.rays.iter().map(|observation_ray| {
+            let rays_rotation = (agent_rotation * Quat::from_axis_angle(Vector3::Y, observation_ray.angle)) * Vector3::Z;
+            
+            let ray = Ray::new(
+                agent_translation, 
+                rays_rotation,
+            );
+            let max_toi = observation_ray.length;
+            let solid = true;
+            let filter = QueryFilter::default().exclude_rigid_body(self.agent_handle.unwrap());
+
+            let query_pipeline = simulation.broad_phase.as_query_pipeline(
+                simulation.narrow_phase.query_dispatcher(),
+                &simulation.bodies,
+                &simulation.colliders,
+                filter,
+            );
+
+            let detection = if let Some((_, toi)) = query_pipeline.cast_ray(
+                &ray, max_toi, solid
+            ) {
+                toi / observation_ray.length
+            } else {
+                1.0
+            };
+            (rays_rotation.x.atan2(rays_rotation.z), detection)
+        }).collect()
+    }
+
+    fn downsample_trajcetory(&self, max_points: usize) -> Vec<TrajectoryPoints> {
         let len = self.trajectory.len();
 
         if len <= max_points || max_points < 2 {
@@ -150,7 +197,7 @@ impl Simple2dEnvironment {
             let fraction = i as f32 / (max_points - 1) as f32;
             let original_index = (fraction * (len - 1) as f32).round() as usize;
             
-            reduced.push(self.trajectory[original_index]);
+            reduced.push(self.trajectory[original_index].clone());
         }
 
         reduced
@@ -181,7 +228,7 @@ impl Simple2dEnvironment {
     
         chart
             .configure_mesh()
-            .disable_mesh()
+            // .disable_mesh()
             .x_labels(0)
             .y_labels(0)
             .draw()?;
@@ -191,7 +238,7 @@ impl Simple2dEnvironment {
         // ---------------------------------------------------------
         for obstacle in &self.obstacles {
             chart.draw_series(std::iter::once(Circle::new(
-                (obstacle.x, obstacle.y),
+                (obstacle.x + 0.5, obstacle.y + 0.5),
                 50,
                 full_palette::GREY.filled(),
             )))?;
@@ -240,8 +287,8 @@ impl Simple2dEnvironment {
                 .iter()
                 .map(|p| {
                     (
-                        p.x + 0.5,
-                        p.y + 0.5,
+                        p.position.x + 0.5,
+                        p.position.y + 0.5,
                     )
                 })
                 .collect();
@@ -263,8 +310,8 @@ impl Simple2dEnvironment {
             chart
                 .draw_series(std::iter::once(Circle::new(
                     (
-                        trajectory.last().unwrap().x as f32 + 0.5,
-                        trajectory.last().unwrap().y as f32 + 0.5,
+                        trajectory.last().unwrap().position.x as f32 + 0.5,
+                        trajectory.last().unwrap().position.y as f32 + 0.5,
                     ),
                     8,
                     RED.filled(),
@@ -272,6 +319,34 @@ impl Simple2dEnvironment {
                 .label("Current pos")
                 .legend(|(x, y)| Circle::new((x, y), 5, RED.filled()));
         }
+
+        // ---------------------------------------------------------
+        // Rays
+        // --------------------------------------------------------
+        if until.is_some() {
+            let last_point = trajectory.last().unwrap();
+            let origin = (
+                last_point.position.x as f32 + 0.5,
+                last_point.position.y as f32 + 0.5,
+            );
+
+            for &(angle, detection) in &last_point.rays {
+                let length = detection * last_point.rays_length;
+
+                let end = (
+                    origin.0 + angle.sin() * length,
+                    origin.1 + angle.cos() * length,
+                );
+
+                chart.draw_series(std::iter::once(
+                    PathElement::new(
+                        vec![origin, end],
+                        BLUE.mix(0.9).stroke_width(1),
+                    )
+                ))?;
+            }
+        }
+
 
         root.present()?;
         Ok(())
@@ -282,37 +357,8 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
         let simulation = self.simulation.as_ref().unwrap();
         let agent = &simulation.bodies[self.agent_handle.unwrap()];
 
-        // ---------- Agent position -------------
-        let agent_pos = agent.position();
-        let agent_translation = agent_pos.translation;
-        let agent_rotation = agent_pos.rotation;
-        let agent_pos_state = Vec2::new(agent_translation.x, agent_translation.z);
-
         // ---------- Raycasting -------------
-        let rays_info = self.rays.iter().map(|observation_ray| {
-            let ray = Ray::new(
-                agent_translation, 
-                (agent_rotation * Quat::from_axis_angle(Vector3::Y, observation_ray.angle)) * Vector3::Z
-            );
-            let max_toi = observation_ray.length;
-            let solid = true;
-            let filter = QueryFilter::default().exclude_rigid_body(self.agent_handle.unwrap());
-
-            let query_pipeline = simulation.broad_phase.as_query_pipeline(
-                simulation.narrow_phase.query_dispatcher(),
-                &simulation.bodies,
-                &simulation.colliders,
-                filter,
-            );
-
-            if let Some((_, toi)) = query_pipeline.cast_ray(
-                &ray, max_toi, solid
-            ) {
-                toi / observation_ray.length
-            } else {
-                1.0
-            }
-        }).collect();
+        let rays_info = self.get_rays_observation();
 
         // ---------- Agent rotation -------------
         let rot = *agent.rotation();
@@ -325,9 +371,9 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
         let angle = cross.y.atan2(dot); // radians
 
         Environment2dState {
-            agent_pos: agent_pos_state,
+            distance_to_goal: to_goal.xz().distance(Vector2::ZERO),
             angle_to_goal: angle,
-            rays: rays_info
+            rays: rays_info.iter().map(|r| r.1).collect()
         }
     }
 
@@ -353,7 +399,7 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
         let agent = simulation.bodies.get_mut(self.agent_handle.unwrap()).unwrap();
         let goal_pos = Vector3::new(self.goal_pos.x, 0.5, self.goal_pos.y);
         let distance = agent.translation().xz().distance(goal_pos.xz());
-        self.trajectory.push(agent.translation().xz());
+        let agent_pos = agent.translation().xz();
 
         // -------- Compute collision with obstacles --------------
         let mut intersected = false;
@@ -365,9 +411,17 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
                 break;
             }
         }
+
+        // ------------- Add trajectory ----------------------------
+        let rays_info = self.get_rays_observation();
+        self.trajectory.push(TrajectoryPoints {
+            position: agent_pos,
+            rays: rays_info,
+            rays_length: self.rays.first().and_then(|r| Some(r.length)).unwrap_or(1.0),
+        });
         
         (
-            -distance - if intersected { 50.0 } else { 0.0 } + if distance < 0.2 { 50.0 } else { 0.0 }, 
+            (-distance - if intersected { 50.0 } else { 0.0 } + if distance < 0.2 { 50.0 } else { 0.0 }) / (self.width*self.height), 
             distance < 0.2,
         )
     }
@@ -463,7 +517,7 @@ impl ToTensor for Environment2dActions {
 **************************************************************/
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Environment2dState {
-    pub agent_pos: Vec2,
+    pub distance_to_goal: f32,
     pub angle_to_goal: f32,
     
     /// Each contains a number between 0 and 1
@@ -473,12 +527,13 @@ impl State for Environment2dState {}
 
 impl ToTensor for Environment2dState {
     fn len(&self) -> usize {
-        self.rays.len() + 3
+        self.rays.len() + 2
     }
 
     fn to_vec(&self) -> Vec<f32> {
         let mut data: Vec<f32> = Vec::with_capacity(self.len());
-        data.extend(&[self.agent_pos.x, self.agent_pos.y]);
+        // data.extend(&[self.agent_pos.x, self.agent_pos.y]);
+        data.push(self.distance_to_goal);
         data.push(self.angle_to_goal);
         data.extend(&self.rays);
         data

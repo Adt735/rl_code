@@ -16,7 +16,7 @@ goal_x = 9
 goal_y = 9
 
 # maze_difficulty = 0.5
-reward_type = "Gradient"
+reward_type = "Flat"
 
 
 [training]
@@ -26,6 +26,14 @@ max_steps_per_epoch = 250
 
 [action.SolutionVisualization]
 saving_path = "./assets/"
-show_info_in_plot = true
 create_video = false
-plot_title = "TabularQLearning over Discrete Grid"
+plots = [
+    [
+        "TabularQLearning over Discrete Grid",
+        [
+            ["Reward", 1.0],
+            ["Epsilon", 0.2]
+        ],
+        true
+    ]
+]

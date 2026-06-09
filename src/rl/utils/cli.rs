@@ -169,9 +169,9 @@ pub enum Action {
 #[derive(Deserialize)]
 pub struct OutputConfig {
     pub saving_path: String,
-    pub show_info_in_plot: bool,
     pub create_video: bool,
-    pub plot_title: String,
+    /// Titol, (metrica, pct), ChangeColorOnCompletion
+    pub plots: Vec<(String, Vec<(String, f32)>, bool)>,
 }
 
 #[derive(Deserialize)]
