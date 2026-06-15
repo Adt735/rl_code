@@ -1,33 +1,41 @@
 [algo.FromConfig.Evolutionary]
-nn_layers = [7, 64, 3]
+nn_layers = [12, 16, 3]
 population_size = 100
 elite_count = 2
-mutation_rate = 0.2
-mutation_strength = 0.5
+mutation_rate = 0.5
+mutation_strength = 1.0
 mutation_strength_decay = 0.99
 min_mutation_strength = 0.1
+max_strength_to_freeze = 0.2
 
 
 [env.Plane]
 width = 10.0
 height = 10.0
-start_x = 0.0
-start_y = 0.0
-goal_x = 9.0
-goal_y = 9.0
-n_rays = 5
+n_rays = 9
 length_ray = 2.0
 ray_span = 1.57 # In radians
-reward_type = "Flat"
+reward_type = "Additive"
 
-obstacles = [
-    [3.0, 3.0]
-]
+# agent_pos = { Fixed = { pos = [
+#     [0.0, 0.0],
+# ] } }
+# goal_pos = { Fixed = { pos = [
+#     [9.0, 9.0],
+# ] } }
+agent_pos = { RandomBorder = { n = 2 } }
+goal_pos = { RandomBorder = { n = 2 } }
+obstacles_config = { RandomInside = { n = 3, max_distance = 1.0 } }
+# obstacles_config = { Fixed = { pos = [
+#     # [4.0, 4.0],
+# ] } }
 
 
 [training]
-epochs = 50
+epochs = 500
 max_steps_per_epoch = 1000
+regenerate_every = 5
+update_graphics_every = 50
 
 
 [action.SolutionVisualization]
@@ -35,12 +43,18 @@ saving_path = "./assets/"
 create_video = true
 plots = [
     [
-        "DQL algorithm on plane",
+        "Evolutionary algorithm on plane",
         [
             ["Reward", 1.0],
-            ["Loss", 0.4],
-            # ["Epsilon", 0.2]
+            ["Mutation strength", 0.4],
         ],
         true
-    ]
+    ],
+    # [
+    #     "Evolutionary algorithm on plane",
+    #     [
+    #         ["", 0.2]
+    #     ],
+    #     true
+    # ]
 ]

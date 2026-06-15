@@ -409,6 +409,10 @@ impl EnvironmentTrait<GridState, GridActions> for SimpleGridEnvironment {
 
         Ok(())
     }
+
+    fn clone_box(&self) -> Box<dyn EnvironmentTrait<GridState, GridActions>> {
+        Box::new(self.clone())
+    }
 }
 
 

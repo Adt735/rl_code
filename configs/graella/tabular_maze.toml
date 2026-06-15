@@ -1,0 +1,33 @@
+[algo.FromConfig.TabularQLearning]
+min_e = 1e-3
+decay_rate_e = 0.9995
+learning_rate = 0.2
+reward_discount_factor = 0.99
+
+
+[env.Grid]
+width = 25
+height = 25
+
+start_x = 0
+start_y = 0
+
+goal_x = 9
+goal_y = 9
+
+maze_difficulty = 0.5
+reward_type = "Flat"
+
+
+[training]
+epochs = 10000
+max_steps_per_epoch = 250
+update_graphics_every = 0
+regenerate_every = 0
+
+
+[action.SolutionVisualization]
+saving_path = "./assets/"
+show_info_in_plot = true
+create_video = false
+plot_title = "TabularQLearning over Discrete Grid Maze"

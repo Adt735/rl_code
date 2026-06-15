@@ -49,7 +49,7 @@ impl<S: State + Hash + Eq + Serialize + DeserializeOwned, A: Action + Hash + Eq 
     }
 }
 impl<S: State + Hash + Eq + Clone + Send + Sync + Serialize + DeserializeOwned, A: Action + Hash + Eq + Copy + Send + Sync + Serialize + DeserializeOwned> RLAlgorithmTrait<S, A> for TabularQLearning<S, A> {
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, rng: &mut dyn rand::rand_core::Rng) {
+    fn train_epoch(&mut self, environment: &mut dyn EnvironmentTrait<S, A>, rng: &mut dyn rand::rand_core::Rng) {
         let mut rewards = Vec::with_capacity(self.max_steps_per_epoch);
         let mut steps = 0;
         loop {

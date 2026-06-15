@@ -16,7 +16,7 @@ pub mod utils;
 ///
 /// The environment exposes the current state, available actions,
 /// and supports stepping through the environment.
-pub trait EnvironmentTrait<S: State, A: Action> {
+pub trait EnvironmentTrait<S: State, A: Action>: Sync + Send {
     /// Returns the current state of the environment.
     fn get_state(&self) -> S;
     
@@ -39,6 +39,11 @@ pub trait EnvironmentTrait<S: State, A: Action> {
     /// 
     /// Just for visualization and validation purposes
     fn real_time_video(&self, frames_path: &str, video_path: &str) -> Result<(), Box<dyn std::error::Error>>;
+
+    // Helper to clone the boxed trait object
+    fn clone_box(&self) -> Box<dyn EnvironmentTrait<S, A>>;
+
+    fn regenerate(&mut self) {}
 }
 
 
@@ -49,7 +54,7 @@ pub trait EnvironmentTrait<S: State, A: Action> {
 pub trait RLAlgorithmTrait<S: State, A: Action>
 {
     /// Executes one training epoch over the environment.
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, rng: &mut dyn rand::rand_core::Rng);
+    fn train_epoch(&mut self, environment: &mut dyn EnvironmentTrait<S, A>, rng: &mut dyn rand::rand_core::Rng);
 
     /// Selects the best action following the learned policy for a given state from a set of possible actions.
     ///
@@ -67,10 +72,10 @@ pub trait RLAlgorithmTrait<S: State, A: Action>
 }
 
 /// All the methods every `State` must implement
-pub trait State: Default + Clone + ToTensor {}
+pub trait State: Default + Clone + ToTensor + Sync + Send {}
 
 /// All the methodws every `Action` must implement
-pub trait Action: Default + Clone + ToTensor {
+pub trait Action: Default + Clone + ToTensor + Sync + Send {
     fn get_all_actions() -> Vec<Self>;
 }
 

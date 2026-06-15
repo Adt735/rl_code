@@ -1,6 +1,7 @@
 use std::{f32::consts::PI, process::Command};
 
 use ::nalgebra::UnitQuaternion;
+use rand::RngExt;
 // use ::nalgebra::{UnitQuaternion, Vector3};
 use rapier3d::{glamx::{Quat, Vec3Swizzles}, prelude::*};
 use serde::{Deserialize, Serialize};
@@ -33,9 +34,18 @@ pub enum PlaneRewardType {
     Flat,
     /// Proportional to distance to goal
     Gradient,
+    /// Positive when moving towards the goal
+    Additive,
 }
 impl PlaneRewardType {
     pub const ALL: [PlaneRewardType; 2] = [PlaneRewardType::Flat, PlaneRewardType::Gradient];
+}
+
+#[derive(Deserialize, Clone)]
+pub enum PlanePositionType {
+    Fixed { pos: Vec<Vec2> },
+    RandomInside { n: usize, max_distance: f32 },
+    RandomBorder { n: usize },
 }
 
 #[derive(Clone)]
@@ -51,10 +61,13 @@ pub struct Simple2dEnvironment {
     pub rays: Vec<RayObservation2d>,
 
     pub goal_pos: Vec2,
-    pub initial_agent_pos: Vector,
+    pub initial_agent_pos: Vec2,
+    pub goal_pos_config: PlanePositionType,
+    pub initial_agent_pos_config: PlanePositionType,
 
     pub width: f32,
     pub height: f32,
+    pub obstacles_config: PlanePositionType,
     pub obstacles: Vec<Vec2>,
 
     pub simulation: Option<RapierSim>,
@@ -66,18 +79,24 @@ pub struct Simple2dEnvironment {
 }
 impl Simple2dEnvironment {
     pub fn new(
-        width: f32, height: f32, agent_pos: Vec2, goal_pos: Vec2, obstacles: Vec<Vec2>, reward_type: PlaneRewardType,
+        width: f32, height: f32, initial_agent_pos_config: &PlanePositionType, goal_pos_config: &PlanePositionType, obstacles_config: &PlanePositionType, reward_type: PlaneRewardType,
         n_rays: usize, length_ray: f32, ray_span: f32
     ) -> Self {
+        let goal_pos = Self::generate_position(goal_pos_config, width, height, Vec2::ZERO, Vec2::ZERO).iter().next().unwrap_or(&Vec2::ZERO).clone();
+        let agent_pos = Self::generate_position(initial_agent_pos_config, width, height, Vec2::ZERO, Vec2::ZERO).iter().next().unwrap_or(&Vec2::ZERO).clone();
+
         Self {
             rays: (0..n_rays).map(|v| RayObservation2d{ length: length_ray, angle: -ray_span/2.0 + v as f32 / (n_rays-1) as f32 * ray_span }).collect(),
 
+            goal_pos_config: goal_pos_config.clone(),
             goal_pos,
-            initial_agent_pos: Vector::new(agent_pos.x, 0.5, agent_pos.y),
+            initial_agent_pos_config: initial_agent_pos_config.clone(),
+            initial_agent_pos: agent_pos,
 
             width,
             height,
-            obstacles,
+            obstacles: Self::generate_position(&obstacles_config, width, height, agent_pos, goal_pos),
+            obstacles_config: obstacles_config.clone(),
 
             simulation: None,
             agent_handle: None,
@@ -86,6 +105,116 @@ impl Simple2dEnvironment {
             reward_type,
             trajectory: Vec::new(),
         }.generate_environment_sim()
+    }
+
+    pub fn regenerate(&mut self) {
+        self.initial_agent_pos = Self::generate_position(&self.initial_agent_pos_config, self.width, self.height, self.initial_agent_pos, self.goal_pos).iter().next().unwrap_or(&Vec2::ZERO).clone();
+        self.goal_pos = Self::generate_position(&self.goal_pos_config, self.width, self.height, self.initial_agent_pos, self.goal_pos).iter().next().unwrap_or(&Vec2::ZERO).clone();
+        self.obstacles = Self::generate_position(&self.obstacles_config, self.width, self.height, self.initial_agent_pos, self.goal_pos);
+
+        *self = self.clone().generate_environment_sim();
+    }
+
+    fn generate_position(config: &PlanePositionType, width: f32, height: f32, agent_pos: Vec2, goal_pos: Vec2) -> Vec<Vec2> {
+        match config {
+            PlanePositionType::RandomInside { n, max_distance } => {
+                 let mut rng = rand::rng();
+
+                let direction = goal_pos - agent_pos;
+                let length = direction.length();
+
+                // Agent and goal are basically the same point.
+                if length < 1e-6 {
+                    return Vec::new();
+                }
+
+                let dir = direction / length;
+
+                // Perpendicular vector
+                let normal = Vec2::new(-dir.y, dir.x);
+
+                let mut obstacles = Vec::new();
+
+                for _ in 0..*n {
+                    let mut found = false;
+
+                    // Try multiple times before giving up
+                    for _ in 0..100 {
+                        // Position along the line
+                        let t = rng.random_range(0.0..1.0);
+
+                        // Offset from the line
+                        let offset = rng.random_range(-*max_distance..*max_distance);
+
+                        let candidate =
+                            agent_pos
+                            + dir * (t * length)
+                            + normal * offset;
+
+                        // Keep inside arena
+                        if candidate.x < 0.0
+                            || candidate.x > width
+                            || candidate.y < 0.0
+                            || candidate.y > height
+                        {
+                            continue;
+                        }
+
+                        // Minimum distance between src and dest
+                        if candidate.distance(agent_pos) < 1.1
+                            || candidate.distance(goal_pos) < 1.1
+                        {
+                            continue;
+                        }
+
+                        obstacles.push(candidate);
+                        found = true;
+                        break;
+                    }
+
+                    // No valid position found for this obstacle:
+                    // simply skip it.
+                    if !found {
+                        continue;
+                    }
+                }
+
+                obstacles
+            },
+            PlanePositionType::RandomBorder { n } => {
+                let mut rng = rand::rng();
+                (0..*n)
+                    .map(|_| {
+                        match rng.random_range(0..4) {
+                            // Bottom border
+                            0 => Vec2::new(
+                                rng.random_range(0.0..width),
+                                0.0,
+                            ),
+
+                            // Top border
+                            1 => Vec2::new(
+                                rng.random_range(0.0..width),
+                                height,
+                            ),
+
+                            // Left border
+                            2 => Vec2::new(
+                                0.0,
+                                rng.random_range(0.0..height),
+                            ),
+
+                            // Right border
+                            _ => Vec2::new(
+                                width,
+                                rng.random_range(0.0..height),
+                            ),
+                        }
+                    })
+                    .collect()
+            }
+            PlanePositionType::Fixed { pos } => pos.clone(),
+        }
     }
 
     fn generate_environment_sim(mut self) -> Self {
@@ -125,7 +254,7 @@ impl Simple2dEnvironment {
 
         // --- Agent ---
         let agent_body = RigidBodyBuilder::kinematic_velocity_based()
-            .translation(self.initial_agent_pos)
+            .translation(Vec3::new(self.initial_agent_pos.x, 0.5, self.initial_agent_pos.y))
             .rotation(Vector::new(0.0, 0.0, 0.0))
             .build();
         let agent_handle = bodies.insert(agent_body);
@@ -205,6 +334,7 @@ impl Simple2dEnvironment {
 
     fn plot(&self, path: &str, until: Option<usize>, n_trajectory_points: usize) -> Result<(), Box<dyn std::error::Error>> {    
         let cell_size = 50;
+        let pixels_per_unit = self.width * cell_size as f32 * 1.5 / (self.width + 4.0);
         
         // ---------------------------------------------------------
         // Draw config
@@ -222,8 +352,8 @@ impl Simple2dEnvironment {
         let mut chart = ChartBuilder::on(&root)
             .margin(0)
             .build_cartesian_2d(
-                0f32..self.width as f32,
-                0f32..self.height as f32,
+                -2f32..(self.width + 2.0) as f32,
+                -2f32..(self.height + 2.0) as f32,
             )?;
     
         chart
@@ -238,8 +368,8 @@ impl Simple2dEnvironment {
         // ---------------------------------------------------------
         for obstacle in &self.obstacles {
             chart.draw_series(std::iter::once(Circle::new(
-                (obstacle.x + 0.5, obstacle.y + 0.5),
-                50,
+                (obstacle.x, obstacle.y),
+                0.5 * pixels_per_unit,
                 full_palette::GREY.filled(),
             )))?;
         }
@@ -250,10 +380,10 @@ impl Simple2dEnvironment {
         chart
             .draw_series(std::iter::once(Circle::new(
                 (
-                    self.initial_agent_pos.x as f32 + 0.5,
-                    self.initial_agent_pos.z as f32 + 0.5,
+                    self.initial_agent_pos.x as f32,
+                    self.initial_agent_pos.y as f32,
                 ),
-                10,
+                0.25 * pixels_per_unit,
                 RED,
             )))?
             .label("Start")
@@ -265,10 +395,10 @@ impl Simple2dEnvironment {
         chart
             .draw_series(std::iter::once(Circle::new(
                 (
-                    self.goal_pos.x as f32 + 0.5,
-                    self.goal_pos.y as f32 + 0.5,
+                    self.goal_pos.x as f32,
+                    self.goal_pos.y as f32,
                 ),
-                20,
+                0.2 * pixels_per_unit,
                 GREEN.mix(0.5).filled(),
             )))?
             .label("Goal")
@@ -287,8 +417,8 @@ impl Simple2dEnvironment {
                 .iter()
                 .map(|p| {
                     (
-                        p.position.x + 0.5,
-                        p.position.y + 0.5,
+                        p.position.x,
+                        p.position.y,
                     )
                 })
                 .collect();
@@ -310,10 +440,10 @@ impl Simple2dEnvironment {
             chart
                 .draw_series(std::iter::once(Circle::new(
                     (
-                        trajectory.last().unwrap().position.x as f32 + 0.5,
-                        trajectory.last().unwrap().position.y as f32 + 0.5,
+                        trajectory.last().unwrap().position.x as f32,
+                        trajectory.last().unwrap().position.y as f32,
                     ),
-                    8,
+                    0.25 * pixels_per_unit,
                     RED.filled(),
                 )))?
                 .label("Current pos")
@@ -326,8 +456,8 @@ impl Simple2dEnvironment {
         if until.is_some() {
             let last_point = trajectory.last().unwrap();
             let origin = (
-                last_point.position.x as f32 + 0.5,
-                last_point.position.y as f32 + 0.5,
+                last_point.position.x as f32,
+                last_point.position.y as f32,
             );
 
             for &(angle, detection) in &last_point.rays {
@@ -353,6 +483,8 @@ impl Simple2dEnvironment {
     }
 }
 impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvironment {
+    fn regenerate(&mut self) { self.regenerate(); }
+
     fn get_state(&self) -> Environment2dState {
         let simulation = self.simulation.as_ref().unwrap();
         let agent = &simulation.bodies[self.agent_handle.unwrap()];
@@ -371,8 +503,9 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
         let angle = cross.y.atan2(dot); // radians
 
         Environment2dState {
-            distance_to_goal: to_goal.xz().distance(Vector2::ZERO),
-            angle_to_goal: angle,
+            distance_to_goal: to_goal.xz().distance(Vector2::ZERO) / (self.width / self.height),
+            sin_to_goal: angle.sin(),
+            cos_to_goal: angle.cos(),
             rays: rays_info.iter().map(|r| r.1).collect()
         }
     }
@@ -419,9 +552,36 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
             rays: rays_info,
             rays_length: self.rays.first().and_then(|r| Some(r.length)).unwrap_or(1.0),
         });
+
+        let reward = match self.reward_type {
+            PlaneRewardType::Flat => 
+                -1.0 
+                - if intersected { 10.0 } else { 0.0 } 
+                + if distance < 0.2 { 50.0 } else { 0.0 }
+            ,
+            PlaneRewardType::Gradient => 
+                (-distance
+                - if intersected { 10.0 * (self.width*self.height).sqrt() } else { 0.0 } 
+                + if distance < 0.2 { 50.0 * (self.width*self.height).sqrt() } else { 0.0 }) / (self.width*self.height).sqrt()
+            ,
+            PlaneRewardType::Additive => {
+                let mut last_points = self.trajectory.iter().rev().take(2);
+
+                let distance_advanced = if let (Some(pos_1), Some(pos_2)) = (last_points.next(), last_points.next()) {
+                    // Use pos_1 and pos_2 here
+                    pos_2.position.distance(self.goal_pos) - pos_1.position.distance(self.goal_pos)
+                } else {
+                    0.0
+                };
+
+                distance_advanced - 0.01
+                - if intersected { 10.0 } else { 0.0 } 
+                + if distance < 0.2 { 50.0 } else { 0.0 }
+            },
+        };
         
         (
-            (-distance - if intersected { 50.0 } else { 0.0 } + if distance < 0.2 { 50.0 } else { 0.0 }) / (self.width*self.height), 
+            reward, 
             distance < 0.2,
         )
     }
@@ -429,7 +589,7 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
     fn reset(&mut self) {       
         let simulation = self.simulation.as_mut().unwrap();
         let agent = simulation.bodies.get_mut(self.agent_handle.unwrap()).unwrap();
-        agent.set_translation(self.initial_agent_pos, true);
+        agent.set_translation(Vec3::new(self.initial_agent_pos.x, 0.5, self.initial_agent_pos.y), true);
         agent.set_rotation(Quat::from_axis_angle(Vector3::Y, 0.0), true);
         self.trajectory.clear();
     }
@@ -462,6 +622,10 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
 
         Ok(())
     }
+
+    fn clone_box(&self) -> Box<dyn EnvironmentTrait<Environment2dState, Environment2dActions>> {
+        Box::new(self.clone())
+    }
 }
 
 impl Clone for Simple2dEnvironment {
@@ -470,8 +634,11 @@ impl Clone for Simple2dEnvironment {
             rays: self.rays.iter().cloned().collect(),
             goal_pos: self.goal_pos.clone(), 
             initial_agent_pos: self.initial_agent_pos.clone(), 
+            goal_pos_config: self.goal_pos_config.clone(), 
+            initial_agent_pos_config: self.initial_agent_pos_config.clone(), 
             width: self.width.clone(), 
             height: self.height.clone(), 
+            obstacles_config: self.obstacles_config.clone(),
             obstacles: self.obstacles.clone(), 
             simulation: None,
             agent_handle: None,
@@ -518,7 +685,9 @@ impl ToTensor for Environment2dActions {
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Environment2dState {
     pub distance_to_goal: f32,
-    pub angle_to_goal: f32,
+
+    pub sin_to_goal: f32,
+    pub cos_to_goal: f32,
     
     /// Each contains a number between 0 and 1
     pub rays: Vec<f32>,
@@ -527,14 +696,15 @@ impl State for Environment2dState {}
 
 impl ToTensor for Environment2dState {
     fn len(&self) -> usize {
-        self.rays.len() + 2
+        self.rays.len() + 3
     }
 
     fn to_vec(&self) -> Vec<f32> {
         let mut data: Vec<f32> = Vec::with_capacity(self.len());
         // data.extend(&[self.agent_pos.x, self.agent_pos.y]);
         data.push(self.distance_to_goal);
-        data.push(self.angle_to_goal);
+        data.push(self.sin_to_goal);
+        data.push(self.cos_to_goal);
         data.extend(&self.rays);
         data
     }

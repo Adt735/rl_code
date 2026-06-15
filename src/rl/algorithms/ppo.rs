@@ -90,9 +90,10 @@ where
         max_steps_per_epoch: usize,
         actor_layers: Vec<i64>,
         critic_layers: Vec<i64>,
+        nn_file_path: String,
     ) -> Self {
-        let actor = NeuralNetwork::new(device, actor_layers, true);
-        let critic = NeuralNetwork::new(device, critic_layers, false);
+        let actor = NeuralNetwork::new(device, actor_layers, true, nn_file_path.clone() + "actor.ot");
+        let critic = NeuralNetwork::new(device, critic_layers, false, nn_file_path + "critic.ot");
 
         let actor_optimizer = nn::Adam::default()
             .build(&actor.vs, actor_lr)
@@ -189,7 +190,7 @@ where
     /// correct and avoids mixing bootstrapping across episodes.
     fn rollout_episode(
         &mut self,
-        environment: &mut Box<dyn EnvironmentTrait<S, A>>,
+        environment: &mut dyn EnvironmentTrait<S, A>,
     ) -> EpisodeRollout<S> {
         environment.reset();
         let mut state = environment.get_state();
@@ -336,9 +337,9 @@ where
         old_log_probs: Vec<f32>,
         advantages: Vec<f32>,
         returns: Vec<f32>,
-    ) {
+    ) -> (f32, f32) {
         if states.is_empty() {
-            return;
+            return (0.0, 0.0);
         }
 
         let states = states.to_tensor().to_device(self.device);
@@ -354,6 +355,9 @@ where
 
         let n_samples = states.size()[0] as usize;
         let mut indices: Vec<usize> = (0..n_samples).collect();
+
+        let mut actor_losses = Vec::with_capacity(self.epochs * indices.len() * self.mini_batch_size);
+        let mut critic_losses = Vec::with_capacity(self.epochs * indices.len() * self.mini_batch_size);
 
         for _ in 0..self.epochs {
             indices.shuffle(&mut rand::rng());
@@ -412,6 +416,9 @@ where
 
                 actor_optimizer.step();
                 critic_optimizer.step();
+
+                actor_losses.push(actor_loss.double_value(&[]));
+                critic_losses.push(critic_loss.double_value(&[]));
             }
         }
 
@@ -419,6 +426,11 @@ where
         self.current_entropy_weight = self
             .min_entropy
             .max(self.current_entropy_weight * self.decay_rate_entropy);
+
+        (
+            (actor_losses.iter().sum::<f64>() / actor_losses.len() as f64) as f32,
+            (critic_losses.iter().sum::<f64>() / critic_losses.len() as f64) as f32,
+        )
     }
 }
 
@@ -427,7 +439,7 @@ where
     S: Clone + Default + State + Serialize + DeserializeOwned,
     A: Clone + Default + Hash + Action + Eq + Copy + Serialize + DeserializeOwned,
 {
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, _rng: &mut dyn rand::rand_core::Rng) {
+    fn train_epoch(&mut self, environment: &mut dyn EnvironmentTrait<S, A>, _rng: &mut dyn rand::rand_core::Rng) {
         self.ensure_optimizers();
 
         let mut rollouts = Vec::with_capacity(self.batch_size.max(1));
@@ -442,17 +454,19 @@ where
         let (states, actions, old_log_probs, advantages, returns, rewards_for_stats, _dones) =
             self.flatten_rollouts(&rollouts);
 
+        let (actor_loss, critic_loss) = self.update_policy(states, actions, old_log_probs, advantages, returns);
+
         // Keep the existing statistics API, but record the actual rollout rewards.
         // The `info` field is used here to track the current entropy coefficient.
         self.statistics.push(
             success,
             vec![
-                ("Reward".to_string(), rewards_for_stats.iter().sum::<f32>()),
-                ("Epsilon".to_string(), self.current_entropy_weight),
+                ("Reward".to_string(), rewards_for_stats.iter().sum::<f32>() / self.batch_size as f32),
+                ("Entropy".to_string(), self.current_entropy_weight),
+                ("Actor Loss".to_string(), actor_loss),
+                ("Critic Loss".to_string(), critic_loss),
             ]
         );
-
-        self.update_policy(states, actions, old_log_probs, advantages, returns);
     }
 
     fn best_action(&self, state: &S, actions: &[A]) -> Option<A> {

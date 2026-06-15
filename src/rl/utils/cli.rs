@@ -4,7 +4,7 @@ use rapier3d::math::Vec2;
 use std::path::PathBuf;
 use serde::Deserialize;
 
-use crate::rl::environments::prelude::{GridRewardType, PlaneRewardType};
+use crate::rl::environments::prelude::{GridRewardType, PlanePositionType, PlaneRewardType};
 
 
 /**************************************************************
@@ -34,7 +34,7 @@ pub struct Config {
 **************************************************************/
 #[derive(Deserialize)]
 pub enum AlgoInitialization {
-    Load { path: String },
+    Load { path: String, new_dim: Option<Vec<usize>> },
     FromConfig(AlgoType)
 }
 #[derive(Deserialize)]
@@ -65,6 +65,7 @@ pub struct DeepQConfig {
     pub n_epochs_to_update_target: usize,
     pub replay_memory_capacity: usize, 
     pub q_network_layers: Vec<i64>,
+    pub net_path: String,
 }
 #[derive(Deserialize)]
 pub struct PPOConfig {
@@ -81,6 +82,7 @@ pub struct PPOConfig {
     pub current_entropy_weight: f32,
     pub min_entropy: f32,
     pub decay_rate_entropy: f32,
+    pub net_path: String,
 }
 #[derive(Deserialize)]
 pub struct EvolutionaryConfig {
@@ -91,6 +93,7 @@ pub struct EvolutionaryConfig {
     pub mutation_strength: f32,
     pub mutation_strength_decay: f32,
     pub min_mutation_strength: f32,    
+    pub max_strength_to_freeze: f32,    
 }
 
 
@@ -125,20 +128,16 @@ pub struct PlaneEnvConfig {
     pub width: f32,
     pub height: f32,
 
-    pub start_x: f32,
-    pub start_y: f32,
+    pub agent_pos: PlanePositionType,
+    pub goal_pos: PlanePositionType,
 
-    pub goal_x: f32,
-    pub goal_y: f32,
-
-    pub obstacles: Vec<Vec2>,
+    pub obstacles_config: PlanePositionType,
     pub n_rays: usize, 
     pub length_ray: f32, 
     pub ray_span: f32,
 
     pub reward_type: PlaneRewardType,
 }
-
 
 /**************************************************************
 ===============================================================
@@ -149,7 +148,9 @@ pub struct PlaneEnvConfig {
 pub struct TrainingConfig {
     pub epochs: usize,
     pub max_steps_per_epoch: usize,
-    pub seed: Option<u64>
+    pub seed: Option<u64>,
+    pub update_graphics_every: usize,
+    pub regenerate_every: usize,
 }
 
 

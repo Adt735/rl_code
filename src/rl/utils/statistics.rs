@@ -275,7 +275,7 @@ impl Statistics {
             }
 
             let mut chart = ChartBuilder::on(area)
-                .caption(format!("{} — {}", title, name), ("sans-serif", 24))
+                .caption(format!("{} — {}", title, name), (32))
                 .margin(20)
                 .x_label_area_size(40)
                 .y_label_area_size(60)
@@ -285,6 +285,7 @@ impl Statistics {
                 .configure_mesh()
                 .x_desc("Episode")
                 .y_desc(name)
+                .axis_desc_style(("sans-serif", 24))
                 .draw()?;
 
             if color_by_completion {
@@ -385,16 +386,18 @@ impl Statistics {
         }
 
         let mut chart = ChartBuilder::on(&root)
-            .caption(title, ("sans-serif", 30))
+            .caption(title, 36)
             .margin(20)
-            .x_label_area_size(40)
-            .y_label_area_size(60)
+            .x_label_area_size(60)
+            .y_label_area_size(90)
             .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
 
         chart
             .configure_mesh()
             .x_desc("Episode")
             .y_desc(metric)
+            .axis_desc_style(("sans-serif", 32))
+            .label_style(("sans-serif", 24))
             .draw()?;
 
         for (idx, (label, buckets)) in all_points.iter().enumerate() {

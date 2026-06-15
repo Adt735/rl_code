@@ -25,7 +25,7 @@ fn main() {
 
             // ----------------------- Initialization ----------------------------------------
             let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
-            let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
+            let mut environment = generate_environment(&config.env);
 
             // ----------------------- Training ----------------------------------------
             println!("Training...");
@@ -35,7 +35,7 @@ fn main() {
 
             // ----------------------- Visualization ----------------------------------------
             environment.reset();
-            for _ in 0..250 {
+            for _ in 0..config.training.max_steps_per_epoch {
                 let action = algo.best_action(&environment.get_state(), &GridActions::ALL);
                 if let Some(action) = action {
                     let (_, terminated) = environment.step(action);
@@ -50,7 +50,7 @@ fn main() {
             std::fs::create_dir_all(output_config.saving_path.clone() + "frames/").unwrap();
 
             for (i, plot) in output_config.plots.iter().enumerate() {
-                algo.statistics.plot(&format!("{}metric_{i}_plot.png", output_config.saving_path.clone()), &plot.0, &plot.1, plot.2).unwrap();
+                algo.get_statistics().plot(&format!("{}metric_{i}_plot.png", output_config.saving_path.clone()), &plot.0, &plot.1, plot.2).unwrap();
             }
             environment.plot(&(output_config.saving_path.clone() + "solution.png")).unwrap();
             if output_config.create_video {
@@ -58,7 +58,7 @@ fn main() {
             }
             std::fs::write(
                 &(output_config.saving_path.clone() + "model.json"), 
-                serde_json::to_string_pretty(&algo).unwrap()
+                algo.to_json()
             ).unwrap();
 
             std::fs::remove_dir_all(output_config.saving_path.clone() + "frames/").unwrap();
@@ -71,7 +71,7 @@ fn main() {
                 }
 
                 // ----------------------- Initialization ----------------------------------------
-                let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
+                let mut environment = generate_environment(&config.env);
 
                 // ----------------------- Training ----------------------------------------
                 // this trains n algorithms and unifies their statistics
@@ -85,7 +85,7 @@ fn main() {
                             algo.train_epoch(&mut environment, &mut rng);
                         }
 
-                        algo.statistics
+                        algo.get_statistics().clone()
                     }).collect(),
                 );
 
@@ -114,7 +114,7 @@ fn main() {
             };
             let environment = generate_environment(&config.env);
             let goal_pos = environment.goal_pos;
-            let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(environment);
+            let mut environment = environment;
 
             for alpha in &hyperparams_config.learning_rates {
                 for gamma in &hyperparams_config.reward_discount_factors {
@@ -183,7 +183,7 @@ fn main() {
 
                 // ----------------------- Initialization ----------------------------------------
                 let mut algo = load_algo(&config.algo, config.training.max_steps_per_epoch);
-                let mut environment: Box<dyn EnvironmentTrait<GridState, GridActions>> = Box::new(generate_environment(&config.env));
+                let mut environment = generate_environment(&config.env);
 
                 // ----------------------- Training ----------------------------------------
                 let start = std::time::Instant::now();
@@ -193,8 +193,8 @@ fn main() {
                 let elapsed_single = (std::time::Instant::now() - start).as_secs_f32();
                 
                 // ----------------------- Saving ----------------------------------------
-                reward.push(algo.statistics.last_value("Reward").unwrap_or(0.0));
-                success.push(algo.statistics.last_completed().unwrap_or(false) as usize);
+                reward.push(algo.get_statistics().last_value("Reward").unwrap_or(0.0));
+                success.push(algo.get_statistics().last_completed().unwrap_or(false) as usize);
                 elapsed.push(elapsed_single);
                 memory.push(algo.get_memory_usage());
             }
@@ -208,22 +208,59 @@ fn main() {
 }
 
 
-fn load_algo(algo_initialization: &AlgoInitialization, max_steps_per_epoch: usize) -> TabularQLearning<GridState, GridActions> {
+fn load_algo(algo_initialization: &AlgoInitialization, max_steps_per_epoch: usize) -> Box<dyn RLAlgorithmTrait<GridState, GridActions>> {
     match algo_initialization {
-        AlgoInitialization::Load { path } => {
+        AlgoInitialization::Load { path, new_dim } => {
             let json = std::fs::read_to_string(path).unwrap();
-            serde_json::from_str(&json).unwrap()
+            let header: AlgoHeader = serde_json::from_str(&json).unwrap();
+            
+            match header.algo_type {
+                rl::RlAlgoType::TabularQTable => {let a: TabularQLearning<GridState, GridActions> = serde_json::from_str(&json).unwrap(); Box::new(a)},
+                rl::RlAlgoType::DeepQ => {let a: DeepQLearning<GridState, GridActions> = serde_json::from_str(&json).unwrap(); Box::new(a)},
+                rl::RlAlgoType::PPO => {let a: PPO<GridState, GridActions> = serde_json::from_str(&json).unwrap(); Box::new(a)},
+                rl::RlAlgoType::Evolutionary => {
+                    let mut a: EvolutionaryAlgorithm<GridState, GridActions> = serde_json::from_str(&json).unwrap(); 
+                    
+                    if let Some(new_dim) = new_dim {
+                        a.expand(new_dim);
+                    }
+
+                    Box::new(a)
+                },
+            }
         },
         AlgoInitialization::FromConfig(algo_type) => {
             match algo_type {
                 AlgoType::TabularQLearning(algo_config) => {
-                    TabularQLearning::new(
+                    Box::new(TabularQLearning::new(
                         algo_config.min_e, algo_config.decay_rate_e, 
                         algo_config.learning_rate, algo_config.reward_discount_factor, 
                         max_steps_per_epoch
-                    )
+                    ))
                 }
-                _ => panic!("This executable only accepts Plain Environment")
+                AlgoType::DeepQLearning(algo_config) => {
+                    Box::new(DeepQLearning::new(
+                        algo_config.min_e, algo_config.decay_rate_e, algo_config.learning_rate, algo_config.reward_discount_factor, max_steps_per_epoch,
+                        algo_config.batch_size, algo_config.n_rollouts, algo_config.n_epochs, algo_config.n_epochs_to_update_target,
+                        tch::Device::Cpu, algo_config.replay_memory_capacity, algo_config.q_network_layers.clone(), algo_config.net_path.clone()
+                    ))
+                }
+                AlgoType::PPO(algo_config) => {
+                    Box::new(PPO::new(
+                        tch::Device::Cpu, algo_config.actor_lr, algo_config.critic_lr, 
+                        algo_config.lmbda, algo_config.epochs, algo_config.batch_size, algo_config.mini_batch_size, 
+                        algo_config.epsilon, algo_config.gamma, 
+                        algo_config.current_entropy_weight, algo_config.min_entropy, algo_config.decay_rate_entropy, 
+                        max_steps_per_epoch, algo_config.actor_layers.clone(), algo_config.critic_layers.clone(), algo_config.net_path.clone()
+                    ))
+                }
+                AlgoType::Evolutionary(algo_config) => {
+                    Box::new(EvolutionaryAlgorithm::new(
+                        &algo_config.nn_layers, algo_config.population_size, algo_config.elite_count, 
+                        algo_config.mutation_rate, algo_config.mutation_strength, algo_config.min_mutation_strength, algo_config.mutation_strength_decay, 
+                        algo_config.max_strength_to_freeze, max_steps_per_epoch,
+                    ))
+                }
             }
         },
     }

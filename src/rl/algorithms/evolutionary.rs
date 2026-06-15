@@ -1,4 +1,5 @@
 use rand::{RngExt, seq::SliceRandom};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 use crate::rl::{
@@ -29,6 +30,7 @@ pub struct EvolutionaryAlgorithm<S, A> {
 
     pub mutation_strength_decay: f32,
     pub min_mutation_strength: f32,    
+    pub max_strength_to_freeze: f32,
 
     /// Maximum number of environment steps per evaluation episode.
     pub max_steps_per_episode: usize,
@@ -36,6 +38,7 @@ pub struct EvolutionaryAlgorithm<S, A> {
     pub nn_layers: Vec<usize>,
 
     /// Current population.
+    #[serde(skip, default)]
     pub population: Vec<SimpleNN>,
 
     /// Best network found so far.
@@ -65,6 +68,7 @@ where
         mutation_strength: f32,
         min_mutation_strength: f32,
         mutation_strength_decay: f32,
+        max_strength_to_freeze: f32,
         max_steps_per_episode: usize,
     ) -> Self {
         assert!(population_size > 0, "population_size must be > 0");
@@ -84,6 +88,7 @@ where
             mutation_strength,
             min_mutation_strength,
             mutation_strength_decay,
+            max_strength_to_freeze,
             max_steps_per_episode,
             nn_layers: layers.try_into().unwrap(),
             population,
@@ -112,7 +117,7 @@ where
         &self,
         environment: &mut Box<dyn EnvironmentTrait<S, A>>,
         network: &SimpleNN,
-    ) -> (f32, usize, bool) {
+    ) -> (f32, bool) {
         environment.reset();
         let mut total_reward = 0.0_f32;
         let mut steps = 0_usize;
@@ -138,7 +143,7 @@ where
             }
         }
 
-        (total_reward, steps, _done)
+        (total_reward, _done)
     }
 
     fn evolve_population(&mut self, best_network: &SimpleNN) {
@@ -157,7 +162,7 @@ where
             // Global mutation gate: if true, mutate parameters.
             // The actual per-parameter mutation is handled by SimpleNN::mutate.
             if rng.random::<f32>() < 1.0 {
-                child.mutate(self.mutation_strength, self.mutation_rate as f64);
+                child.mutate(self.mutation_strength, self.mutation_rate as f64, self.mutation_strength > self.max_strength_to_freeze);
             }
 
             new_population.push(child);
@@ -168,6 +173,14 @@ where
         self.population = new_population;
         self.mutation_strength = self.min_mutation_strength.max(self.mutation_strength * self.mutation_strength_decay);
     }
+
+    pub fn expand(&mut self, new_dim: &[usize]) {
+        self.nn_layers = new_dim.iter().cloned().collect();
+        for nn in &mut self.population {
+            nn.expand(new_dim);
+        }
+        self.champion.expand(new_dim);
+    }
 }
 
 impl<S, A> RLAlgorithmTrait<S, A> for EvolutionaryAlgorithm<S, A>
@@ -176,18 +189,48 @@ where
     A: Action + Serialize + DeserializeOwned,
 {
     /// One epoch = evaluate the whole population once and produce a new generation.
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, _rng: &mut dyn rand::rand_core::Rng) {
+    fn train_epoch(&mut self, environment: &mut dyn EnvironmentTrait<S, A>, _rng: &mut dyn rand::rand_core::Rng) {
+        if self.population.len() < self.population_size {
+            self.population.extend((self.population.len()..self.population_size).map(|_| {
+                let mut cloned = self.champion.clone();
+                cloned.mutate(self.mutation_strength, self.mutation_rate as f64, true);
+                cloned
+            }));
+        }
+
+        // 1. Parallel evaluation phase
+        let results: Vec<(f32, bool, _)> = self.population
+            .par_iter()
+            .map(|network| {
+                // Each thread gets its own isolated environment instance
+                let mut local_env = environment.clone_box();
+                let (reward, done) = self.evaluate_network(&mut local_env, network);
+                (reward, done, network.clone())
+                
+                // let mut rewards = Vec::new();
+                // let mut done = true;
+                // for _ in 0..10 { 
+                //     local_env.regenerate();
+                //     let (reward, _done) = self.evaluate_network(&mut local_env, network);
+                //     rewards.push(reward);
+                //     done &= _done;
+                // }
+                // (rewards.iter().sum::<f32>() / rewards.len() as f32, done, network.clone())
+            })
+            .collect();
+
+        // 2. Sequential aggregation phase
         let mut best_reward = f32::NEG_INFINITY;
         let mut best_network = self.population[0].clone();
         let mut generation_rewards = Vec::with_capacity(self.population_size);
         let mut done = false;
-        for network in &self.population {
-            let (reward, steps, _done) = self.evaluate_network(environment, network);
-            generation_rewards.push(reward / steps as f32);
+
+        for (reward, _done, network) in results {
+            generation_rewards.push(reward / self.population_size as f32);
 
             if reward > best_reward {
                 best_reward = reward;
-                best_network = network.clone();
+                best_network = network;
             }
 
             done |= _done;
@@ -199,8 +242,8 @@ where
         self.statistics.push(
             done,
             vec![
-                ("Reward".to_string(), generation_rewards.iter().sum::<f32>()),
-                ("Epsilon".to_string(), self.mutation_strength),
+                ("Reward".to_string(), best_reward),
+                ("Mutation strength".to_string(), self.mutation_strength),
             ]
         );
 

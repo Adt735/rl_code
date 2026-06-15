@@ -52,10 +52,10 @@ where
     pub fn new(
         min_e: f32, decay_rate_e: f32, learning_rate: f32, reward_discount_factor: f32, max_steps_per_epoch: usize,
         batch_size: usize, n_rollouts: usize, n_epochs: usize, n_epochs_to_update_target: usize,
-        device: Device, replay_memory_capacity: usize, q_network_layers: Vec<i64>,
+        device: Device, replay_memory_capacity: usize, q_network_layers: Vec<i64>, nn_file_path: String,
     ) -> Self {
-        let q_network = NeuralNetwork::new(device, q_network_layers.clone(), false);
-        let mut target_network = NeuralNetwork::new(device, q_network_layers, false);
+        let q_network = NeuralNetwork::new(device, q_network_layers.clone(), false, nn_file_path.clone() + "q_net.ot");
+        let mut target_network = NeuralNetwork::new(device, q_network_layers, false, nn_file_path.clone() + "target_net.ot");
         target_network.vs.copy(&q_network.vs).unwrap();
 
         Self {
@@ -68,7 +68,7 @@ where
         }
     }
 
-    pub fn rollout(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, rng: &mut dyn rand::rand_core::Rng) {
+    pub fn rollout(&mut self, environment: &mut dyn EnvironmentTrait<S, A>, rng: &mut dyn rand::rand_core::Rng) {
         environment.reset();
         let mut rewards = Vec::with_capacity(self.max_steps_per_epoch);
         let mut current_state = environment.get_state();
@@ -197,7 +197,7 @@ where
     // Vec<S>: ToTensor,
     // Vec<A>: ToTensor,
 {
-    fn train_epoch(&mut self, environment: &mut Box<dyn EnvironmentTrait<S, A>>, rng: &mut dyn rand::rand_core::Rng) {
+    fn train_epoch(&mut self, environment: &mut dyn EnvironmentTrait<S, A>, rng: &mut dyn rand::rand_core::Rng) {
         if self.optimizer.is_none() {
             self.optimizer = Some(nn::AdamW::default().build(&self.q_network.vs, self.optimizer_learning_rate as f64).unwrap());
         }

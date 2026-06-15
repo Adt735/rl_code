@@ -1,0 +1,49 @@
+[algo.FromConfig.DeepQLearning]
+min_e = 0.05
+decay_rate_e = 0.995
+learning_rate = 1e-2
+reward_discount_factor = 0.99
+
+batch_size = 250
+n_rollouts = 250
+n_epochs = 1
+n_epochs_to_update_target = 1
+replay_memory_capacity = 250
+q_network_layers = [2, 64, 4]
+net_path = "./assets/"
+
+
+[env.Grid]
+width = 10
+height = 10
+
+start_x = 0
+start_y = 0
+
+goal_x = 9
+goal_y = 9
+
+# maze_difficulty = 0.5
+reward_type = "Flat"
+
+
+[training]
+epochs = 1000
+max_steps_per_epoch = 250
+update_graphics_every = 0
+regenerate_every = 0
+
+
+[action.SolutionVisualization]
+saving_path = "./assets/"
+create_video = true
+plots = [
+    [
+        "DeepQLearning over Discrete Grid",
+        [
+            ["Reward", 1.0],
+            ["Loss", 0.5]
+        ],
+        true
+    ]
+]

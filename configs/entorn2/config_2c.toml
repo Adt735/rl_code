@@ -1,0 +1,54 @@
+[algo.Load]
+# path = "assets/model_best3.json"
+path = "assets/model.json"
+new_dim = [12, 64, 3]
+
+
+[env.Plane]
+width = 10.0
+height = 10.0
+n_rays = 9
+length_ray = 2.0
+ray_span = 2.0 # In radians
+reward_type = "Additive"
+
+# obstacles_config = { Fixed = { pos = [
+#     [7.0, 3.0],
+# ] } }
+# agent_pos = { Fixed = { pos = [
+#     [5.0, 5.0],
+# ] } }
+# goal_pos = { Fixed = { pos = [
+#     [9.0, 1.0],
+# ] } }
+agent_pos = { RandomBorder = { n = 2 } }
+goal_pos = { RandomBorder = { n = 2 } }
+obstacles_config = { RandomInside = { n = 3, max_distance = 1.5 } }
+
+[training]
+epochs = 0
+max_steps_per_epoch = 1000
+regenerate_every = 5
+update_graphics_every = 50
+
+
+[action.SolutionVisualization]
+saving_path = "./assets/"
+create_video = true
+plots = [
+    [
+        "Evolutionary algorithm on plane",
+        [
+            ["Reward", 1.0],
+            ["Mutation strength", 0.4],
+        ],
+        true
+    ],
+    # [
+    #     "Evolutionary algorithm on plane",
+    #     [
+    #         ["", 0.2]
+    #     ],
+    #     true
+    # ]
+]

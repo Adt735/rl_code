@@ -19,9 +19,10 @@ pub struct NeuralNetwork {
     pub end_with_softmax: bool,
     pub vs: nn::VarStore,
     pub model: nn::Sequential,
+    pub file_path: String,
 }
 impl NeuralNetwork {
-    pub fn new(device: Device, layers: Vec<i64>, end_with_softmax: bool) -> Self {
+    pub fn new(device: Device, layers: Vec<i64>, end_with_softmax: bool, file_path: String) -> Self {
         assert!(layers.len() >= 2);
 
         let vs = nn::VarStore::new(device);
@@ -53,6 +54,7 @@ impl NeuralNetwork {
             end_with_softmax,
             vs,
             model: seq,
+            file_path,
         }
     }
 
@@ -83,7 +85,7 @@ impl NeuralNetwork {
         device: Device,
         network: &SerializableNetwork
     ) -> tch::Result<Self> {
-        let mut net = Self::new(device, network.layers.clone(), network.end_with_softmax);
+        let mut net = Self::new(device, network.layers.clone(), network.end_with_softmax, network.file.clone());
         net.vs.load(&network.file)?;
         Ok(net)
     }
@@ -103,16 +105,14 @@ impl Serialize for NeuralNetwork {
     where
         S: Serializer,
     {
-        // Define a unique file name or convention for the weights
-        let file_path = "network_weights.ot".to_string();
-        
-        self.vs.save(&file_path)
+       
+        self.vs.save(&self.file_path)
             .map_err(serde::ser::Error::custom)?;
 
         let proxy = SerializableNetwork {
             layers: self.layers.clone(),
             end_with_softmax: self.end_with_softmax,
-            file: file_path,
+            file: self.file_path.clone(),
         };
 
         proxy.serialize(serializer)
@@ -128,7 +128,7 @@ impl<'de> Deserialize<'de> for NeuralNetwork {
         
         // Note: Defaulting to CPU here since device isn't stored in the proxy.
         // Change Device::Cpu to your preferred default or global configuration.
-        let mut net = Self::new(Device::Cpu, proxy.layers, proxy.end_with_softmax);
+        let mut net = Self::new(Device::Cpu, proxy.layers, proxy.end_with_softmax, proxy.file.clone());
         
         net.vs.load(&proxy.file).map_err(serde::de::Error::custom)?;
 
