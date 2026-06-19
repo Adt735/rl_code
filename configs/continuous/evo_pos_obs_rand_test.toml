@@ -1,0 +1,37 @@
+[algo.Load]
+path = "assets/model.json"
+
+
+[env.Plane]
+width = 10.0
+height = 10.0
+n_rays = 11
+length_ray = 2.0
+ray_span = 1.57 # In radians
+reward_type = "Additive"
+
+agent_pos = { RandomBorder = { n = 1 } }
+goal_pos = { RandomBorder = { n = 1 } }
+obstacles_config = { RandomInside = { n = 3, max_distance = 2.0 } }
+
+
+
+[training]
+epochs = 0
+max_steps_per_epoch = 1000
+regenerate_every = 10
+update_graphics_every = 50
+
+
+[action.SolutionVisualization]
+saving_path = "./assets/"
+create_video = true
+plots = [
+    [
+        "Evolutionary algorithm on continuous environment",
+        [
+            ["Reward", 1.0],
+        ],
+        true
+    ],
+]

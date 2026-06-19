@@ -4,8 +4,8 @@ use plotters::prelude::*;
 
 const COLORS: [&RGBColor; 6] = [&RED, &BLUE, &GREEN, &MAGENTA, &CYAN, &BLACK];
 const N_BUCKETS: usize = 10;
-const PLOT_WIDTH: u32 = 1024;
-const PLOT_HEIGHT: u32 = 1024;
+const PLOT_WIDTH: u32 = 1600;
+const PLOT_HEIGHT: u32 = 900;
 
 #[derive(Clone, Debug)]
 pub struct StatPoint {
@@ -29,6 +29,11 @@ impl StatPoint {
             .find(|(k, _)| k == name)
             .map(|(_, v)| *v)
     }
+}
+
+enum Panel {
+    Single(usize),
+    Dual(usize, usize),
 }
 
 #[derive(Debug)]
@@ -142,9 +147,17 @@ impl Statistics {
 
     fn to_buckets(&self) -> Vec<Bucket> {
         let bucket_size = ((self.history.len() as f32) / (N_BUCKETS as f32)).ceil() as usize;
-        let mut buckets = Vec::new();
 
-        for chunk in self.history.chunks(bucket_size.max(1)) {
+        let first_episode = 0;
+        let last_episode = self.history.last().unwrap().episode;
+
+        let total_buckets = self.history.chunks(bucket_size.max(1)).count();
+        let mut buckets = Vec::with_capacity(total_buckets + 1);
+
+        let first_stat = self.history.first().unwrap();
+        buckets.push(Bucket { episode: first_stat.episode, completed_rate: first_stat.completed as u32 as f32, values: first_stat.values.clone() });
+
+        for (bucket_idx, chunk) in self.history.chunks(bucket_size.max(1)).enumerate() {
             let len = chunk.len() as f32;
             let episode = chunk.last().unwrap().episode;
             let completed_rate = chunk.iter().filter(|x| x.completed).count() as f32 / len;
@@ -213,10 +226,49 @@ impl Statistics {
             return Ok(());
         }
 
+        let mut weight_count: BTreeMap<i32, Vec<usize>> = BTreeMap::new();
+
+        // ---------------------------------------------------------
+        // Build panels
+        // ---------------------------------------------------------
+        for (idx, (_, weight)) in series.iter().enumerate() {
+            weight_count
+                .entry((weight * 1000.0) as i32)
+                .or_default()
+                .push(idx);
+        }
+
+        let mut panels = Vec::new();
+        let mut used = vec![false; series.len()];
+
+        for (idx, (_, weight)) in series.iter().enumerate() {
+            if used[idx] {
+                continue;
+            }
+
+            let key = (weight * 1000.0) as i32;
+            let matches = &weight_count[&key];
+
+            if matches.len() == 2 {
+                panels.push(Panel::Dual(matches[0], matches[1]));
+                used[matches[0]] = true;
+                used[matches[1]] = true;
+            } else {
+                panels.push(Panel::Single(idx));
+                used[idx] = true;
+            }
+        }
+
         let root = BitMapBackend::new(path, (PLOT_WIDTH, PLOT_HEIGHT)).into_drawing_area();
         root.fill(&WHITE)?;
 
-        let mut weights: Vec<f32> = series.iter().map(|(_, h)| h.max(0.0)).collect();
+        let mut weights: Vec<f32> = panels
+            .iter()
+            .map(|p| match p {
+                Panel::Single(i) => series[*i].1.max(0.0),
+                Panel::Dual(i, _) => series[*i].1.max(0.0),
+            })
+            .collect();
         if weights.iter().all(|w| *w <= 0.0) {
             weights = vec![1.0; series.len()];
         }
@@ -226,10 +278,10 @@ impl Statistics {
         let mut remaining = root;
         let mut remaining_height = PLOT_HEIGHT;
         let mut remaining_weight = total_weight;
-        let mut areas = Vec::with_capacity(series.len());
+        let mut areas = Vec::with_capacity(panels.len());
 
-        for (idx, (_, weight)) in series.iter().enumerate() {
-            let is_last = idx + 1 == series.len();
+        for (idx, weight) in weights.iter().enumerate() {
+            let is_last = idx + 1 == weights.len();
 
             let raw_h = if is_last {
                 remaining_height
@@ -237,7 +289,7 @@ impl Statistics {
                 ((remaining_height as f32) * (*weight / remaining_weight)).round() as u32
             };
 
-            let min_rest = (series.len() - idx - 1) as u32;
+            let min_rest = (weights.len() - idx - 1) as u32;
             let h = raw_h
                 .max(1)
                 .min(remaining_height.saturating_sub(min_rest).max(1));
@@ -250,65 +302,200 @@ impl Statistics {
             remaining_weight -= *weight;
         }
 
-        let x_min = buckets.first().unwrap().episode;
-        let x_max = buckets.last().unwrap().episode.max(x_min + 1);
+        let x_min = 0;
+        let x_max = self.history.last().unwrap().episode.max(0) + 2;
 
-        for (idx, ((name, _), area)) in series.iter().zip(areas.iter()).enumerate() {
-            let points = Self::metric_points(&buckets, name);
+        for (panel_idx, (panel, area)) in panels.iter().zip(areas.iter()).enumerate()
+        {
+            match panel {
+                Panel::Single(idx) => {
+                    let name = &series[*idx].0;
 
-            if points.len() < 2 {
-                continue;
-            }
+                    let points = Self::metric_points(&buckets, name);
 
-            let (mut y_min, mut y_max) = points.iter().fold(
-                (f32::INFINITY, f32::NEG_INFINITY),
-                |(mn, mx), (_, v)| (mn.min(*v), mx.max(*v)),
-            );
-
-            if (y_max - y_min).abs() < f32::EPSILON {
-                y_min -= 1.0;
-                y_max += 1.0;
-            } else {
-                let pad = (y_max - y_min) * 0.1;
-                y_min -= pad;
-                y_max += pad;
-            }
-
-            let mut chart = ChartBuilder::on(area)
-                .caption(format!("{} — {}", title, name), (32))
-                .margin(20)
-                .x_label_area_size(40)
-                .y_label_area_size(60)
-                .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
-
-            chart
-                .configure_mesh()
-                .x_desc("Episode")
-                .y_desc(name)
-                .axis_desc_style(("sans-serif", 24))
-                .draw()?;
-
-            if color_by_completion {
-                for pair in buckets.windows(2) {
-                    let a = &pair[0];
-                    let b = &pair[1];
-
-                    let av = (a.completed_rate + b.completed_rate) / 2.0;
-                    let color = if av >= 0.5 { &GREEN } else { &RED };
-
-                    let ya = a.values.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
-                    let yb = b.values.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
-
-                    if let (Some(ya), Some(yb)) = (ya, yb) {
-                        chart.draw_series(std::iter::once(PathElement::new(
-                            vec![(a.episode, ya), (b.episode, yb)],
-                            color.stroke_width(4),
-                        )))?;
+                    if points.len() < 2 {
+                        continue;
                     }
+
+                    let (mut y_min, mut y_max) = points.iter().fold(
+                        (f32::INFINITY, f32::NEG_INFINITY),
+                        |(mn, mx), (_, v)| (mn.min(*v), mx.max(*v)),
+                    );
+
+                    if (y_max - y_min).abs() < f32::EPSILON {
+                        y_min -= 1.0;
+                        y_max += 1.0;
+                    } else {
+                        let pad = (y_max - y_min) * 0.1;
+                        y_min -= pad;
+                        y_max += pad;
+                    }
+
+                    let mut chart = ChartBuilder::on(area)
+                        .caption(format!("{} — {}", title, name), 48)
+                        .margin(30)
+                        .x_label_area_size(60)
+                        .y_label_area_size(120)
+                        .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
+
+                    chart
+                        .configure_mesh()
+                        .x_desc("Episode")
+                        .y_desc(name)
+                        .axis_desc_style(("sans-serif", 38))
+                        .label_style(("sans-serif", 28))
+                        .x_labels(6)
+                        .draw()?;
+
+                    if color_by_completion {
+                        for pair in buckets.windows(2) {
+                            let a = &pair[0];
+                            let b = &pair[1];
+
+                            let av = (a.completed_rate + b.completed_rate) / 2.0;
+                            let color = if av >= 0.5 { &GREEN } else { &RED };
+
+                            let ya = a.values.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
+                            let yb = b.values.iter().find(|(k, _)| k == name).map(|(_, v)| *v);
+
+                            if let (Some(ya), Some(yb)) = (ya, yb) {
+                                chart.draw_series(std::iter::once(PathElement::new(
+                                    vec![(a.episode, ya), (b.episode, yb)],
+                                    color.stroke_width(4),
+                                )))?;
+                            }
+                        }          
+
+                        chart
+                            .draw_series(std::iter::once(PathElement::new(
+                                vec![(0, 0.0), (0, 0.0)],
+                                GREEN.stroke_width(3),
+                            )))?
+                            .label("Succeeded")
+                            .legend(|(x, y)| {
+                                PathElement::new(vec![(x, y), (x + 20, y)], GREEN.stroke_width(3))
+                            });
+
+                        chart
+                            .draw_series(std::iter::once(PathElement::new(
+                                vec![(0, 0.0), (0, 0.0)],
+                                RED.stroke_width(3),
+                            )))?
+                            .label("Failed")
+                            .legend(|(x, y)| {
+                                PathElement::new(vec![(x, y), (x + 20, y)], RED.stroke_width(3))
+                            });          
+                    } else {
+                        let color = COLORS[idx % COLORS.len()];
+                        chart.draw_series(LineSeries::new(points, color.stroke_width(3)))?;
+                    }
+
+                    chart
+                        .configure_series_labels()
+                        .label_font(("sans-serif", 25))
+                        .position(if panel_idx == 0 { SeriesLabelPosition::LowerRight } else { SeriesLabelPosition::UpperRight })
+                        .background_style(WHITE.mix(0.8))
+                        .border_style(BLACK)
+                        .draw()?;
                 }
-            } else {
-                let color = COLORS[idx % COLORS.len()];
-                chart.draw_series(LineSeries::new(points, color.stroke_width(3)))?;
+
+                Panel::Dual(left_idx, right_idx) => {
+                    let left_name = &series[*left_idx].0;
+                    let right_name = &series[*right_idx].0;
+
+                    let left_points =
+                        Self::metric_points(&buckets, left_name);
+
+                    let right_points =
+                        Self::metric_points(&buckets, right_name);
+
+                    if left_points.len() < 2 || right_points.len() < 2 {
+                        continue;
+                    }
+
+                    let (y1_min, y1_max) =
+                        compute_y_range(&left_points);
+
+                    let (y2_min, y2_max) =
+                        compute_y_range(&right_points);
+
+                    let mut chart = ChartBuilder::on(area)
+                        .caption(
+                            format!(
+                                "{} — {} / {}",
+                                title,
+                                left_name,
+                                right_name
+                            ),
+                            48,
+                        )
+                        .margin(30)
+                        .x_label_area_size(60)
+                        .y_label_area_size(120)
+                        .right_y_label_area_size(120)
+                        .build_cartesian_2d(
+                            x_min..x_max,
+                            y1_min..y1_max,
+                        )?
+                        .set_secondary_coord(
+                            x_min..x_max,
+                            y2_min..y2_max,
+                        );
+
+                    chart
+                        .configure_mesh()
+                        .x_desc("Episode")
+                        .y_desc(left_name)
+                        .axis_desc_style(("sans-serif", 38))
+                        .label_style(("sans-serif", 28))
+                        .x_labels(6)
+                        .draw()?;
+
+                    chart
+                        .configure_secondary_axes()
+                        .y_desc(right_name)
+                        .axis_desc_style(("sans-serif", 38))
+                        .label_style(("sans-serif", 28))
+                        .draw()?;
+
+                    chart
+                        .draw_series(
+                            LineSeries::new(
+                                left_points,
+                                BLUE.stroke_width(3),
+                            ),
+                        )?
+                        .label(left_name.clone())
+                        .legend(|(x, y)| {
+                            PathElement::new(
+                                vec![(x, y), (x + 20, y)],
+                                BLUE.stroke_width(3),
+                            )
+                        });
+
+                    chart
+                        .draw_secondary_series(
+                            LineSeries::new(
+                                right_points,
+                                RED.stroke_width(3),
+                            ),
+                        )?
+                        .label(right_name.clone())
+                        .legend(|(x, y)| {
+                            PathElement::new(
+                                vec![(x, y), (x + 20, y)],
+                                RED.stroke_width(3),
+                            )
+                        });
+
+                    chart
+                        .configure_series_labels()
+                        .label_font(("sans-serif", 32))
+                        .position(SeriesLabelPosition::MiddleRight)
+                        .background_style(WHITE.mix(0.8))
+                        .border_style(BLACK)
+                        .draw()?;
+                }
             }
         }
 
@@ -330,17 +517,13 @@ impl Statistics {
         root.fill(&WHITE)?;
 
         let mut all_points: Vec<(String, Vec<Bucket>)> = Vec::new();
-        let mut x_min = u32::MAX;
         let mut x_max = 0u32;
         let mut any_points = false;
 
         for (label, stats) in statistics_series {
             let buckets = stats.to_buckets();
-            if let Some(first) = buckets.first() {
-                x_min = x_min.min(first.episode);
-            }
-            if let Some(last) = buckets.last() {
-                x_max = x_max.max(last.episode);
+            if let Some(last) = stats.history.last() {
+                x_max = x_max.max(last.episode + 1);
             }
 
             if !Self::metric_points(&buckets, metric).is_empty() {
@@ -355,9 +538,7 @@ impl Statistics {
             return Ok(());
         }
 
-        if x_min == u32::MAX {
-            x_min = 0;
-        }
+        let x_min = 0;
         if x_max <= x_min {
             x_max = x_min + 1;
         }
@@ -386,18 +567,19 @@ impl Statistics {
         }
 
         let mut chart = ChartBuilder::on(&root)
-            .caption(title, 36)
-            .margin(20)
+            .caption(title, 48)
+            .margin(30)
             .x_label_area_size(60)
-            .y_label_area_size(90)
+            .y_label_area_size(120)
             .build_cartesian_2d(x_min..x_max, y_min..y_max)?;
 
         chart
             .configure_mesh()
             .x_desc("Episode")
             .y_desc(metric)
-            .axis_desc_style(("sans-serif", 32))
-            .label_style(("sans-serif", 24))
+            .axis_desc_style(("sans-serif", 38))
+            .label_style(("sans-serif", 28))
+            .x_labels(6)
             .draw()?;
 
         for (idx, (label, buckets)) in all_points.iter().enumerate() {
@@ -427,4 +609,23 @@ impl Statistics {
         root.present()?;
         Ok(())
     }
+}
+
+
+fn compute_y_range(points: &[(u32, f32)]) -> (f32, f32) {
+    let (mut y_min, mut y_max) = points.iter().fold(
+        (f32::INFINITY, f32::NEG_INFINITY),
+        |(mn, mx), (_, v)| (mn.min(*v), mx.max(*v)),
+    );
+
+    if (y_max - y_min).abs() < f32::EPSILON {
+        y_min -= 1.0;
+        y_max += 1.0;
+    } else {
+        let pad = (y_max - y_min) * 0.1;
+        y_min -= pad;
+        y_max += pad;
+    }
+
+    (y_min, y_max)
 }

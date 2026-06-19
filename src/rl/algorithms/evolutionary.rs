@@ -161,9 +161,7 @@ where
 
             // Global mutation gate: if true, mutate parameters.
             // The actual per-parameter mutation is handled by SimpleNN::mutate.
-            if rng.random::<f32>() < 1.0 {
-                child.mutate(self.mutation_strength, self.mutation_rate as f64, self.mutation_strength > self.max_strength_to_freeze);
-            }
+            child.mutate(self.mutation_strength, self.mutation_rate as f64, false); //self.mutation_strength > self.max_strength_to_freeze
 
             new_population.push(child);
         }
@@ -191,11 +189,12 @@ where
     /// One epoch = evaluate the whole population once and produce a new generation.
     fn train_epoch(&mut self, environment: &mut dyn EnvironmentTrait<S, A>, _rng: &mut dyn rand::rand_core::Rng) {
         if self.population.len() < self.population_size {
-            self.population.extend((self.population.len()..self.population_size).map(|_| {
+            self.population.extend((self.population.len()..(self.population_size-1)).map(|_| {
                 let mut cloned = self.champion.clone();
-                cloned.mutate(self.mutation_strength, self.mutation_rate as f64, true);
+                cloned.mutate(self.mutation_strength, 0.1, true);
                 cloned
             }));
+            self.population.push(self.champion.clone());
         }
 
         // 1. Parallel evaluation phase

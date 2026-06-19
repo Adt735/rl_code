@@ -373,6 +373,15 @@ impl Simple2dEnvironment {
                 full_palette::GREY.filled(),
             )))?;
         }
+        if !self.obstacles.is_empty() {
+            chart.draw_series(std::iter::once(Circle::new(
+                (0.0, 0.0),
+                0.0,
+                full_palette::GREY.filled(),
+            )))?
+                .label("Obstacle")
+                .legend(|(x, y)| Circle::new((x, y), 5, full_palette::GREY.filled()));
+        }
     
         // ---------------------------------------------------------
         // Initial position
@@ -475,8 +484,25 @@ impl Simple2dEnvironment {
                     )
                 ))?;
             }
+
+            if !last_point.rays.is_empty() {
+                chart.draw_series(std::iter::once(Circle::new(
+                    (0.0, 0.0),
+                    0.0,
+                    full_palette::GREY.filled(),
+                )))?
+                    .label("Ray")
+                    .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], BLUE.stroke_width(1)));
+            }
         }
 
+        chart
+            .configure_series_labels()
+            .label_font(("sans-serif", 24))
+            .position(SeriesLabelPosition::LowerRight)
+            .background_style(WHITE.mix(0.8))
+            .border_style(BLACK)
+            .draw()?;
 
         root.present()?;
         Ok(())
@@ -503,7 +529,8 @@ impl EnvironmentTrait<Environment2dState, Environment2dActions> for Simple2dEnvi
         let angle = cross.y.atan2(dot); // radians
 
         Environment2dState {
-            distance_to_goal: to_goal.xz().distance(Vector2::ZERO) / (self.width / self.height),
+            x: to_goal.x / self.width,
+            y: to_goal.z / self.height,
             sin_to_goal: angle.sin(),
             cos_to_goal: angle.cos(),
             rays: rays_info.iter().map(|r| r.1).collect()
@@ -684,7 +711,8 @@ impl ToTensor for Environment2dActions {
 **************************************************************/
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
 pub struct Environment2dState {
-    pub distance_to_goal: f32,
+    pub x: f32,
+    pub y: f32,
 
     pub sin_to_goal: f32,
     pub cos_to_goal: f32,
@@ -702,7 +730,8 @@ impl ToTensor for Environment2dState {
     fn to_vec(&self) -> Vec<f32> {
         let mut data: Vec<f32> = Vec::with_capacity(self.len());
         // data.extend(&[self.agent_pos.x, self.agent_pos.y]);
-        data.push(self.distance_to_goal);
+        data.push(self.x);
+        data.push(self.y);
         data.push(self.sin_to_goal);
         data.push(self.cos_to_goal);
         data.extend(&self.rays);

@@ -22,7 +22,7 @@ pub fn visualize_alpha_gamma_impact(
 
     for (area, (alpha, gamma, q_values)) in areas.iter().zip(results.iter()) {
         let mut chart = ChartBuilder::on(area)
-            .caption(format!("Alpha: {}, Gamma: {}", alpha, gamma), ("sans-serif", 24))
+            .caption(format!("α: {}, γ: {}", alpha, gamma), ("sans-serif", 32))
             .margin(10)
             .x_label_area_size(20)
             .y_label_area_size(20)

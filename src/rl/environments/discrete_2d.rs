@@ -306,6 +306,13 @@ impl SimpleGridEnvironment {
                 .legend(|(x, y)| Circle::new((x, y), 5, RED.filled()));
         }
 
+        chart
+            .configure_series_labels()
+            .label_font(("sans-serif", 24))
+            .position(SeriesLabelPosition::LowerRight)
+            .background_style(WHITE.mix(0.8))
+            .border_style(BLACK)
+            .draw()?;
 
         root.present()?;
         Ok(())
